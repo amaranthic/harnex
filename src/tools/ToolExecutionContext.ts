@@ -6,6 +6,7 @@
  */
 
 import type { CheckpointStore } from "../checkpoints/index.js";
+import type { TaskManager } from "./tasks/TaskManager.js";
 
 /**
  * Execution context supplied to every tool execution.
@@ -40,6 +41,11 @@ export interface ToolExecutionContext {
    * Whether checkpointing is actively enabled for this thread session.
    */
   readonly isCheckpointEnabled?: boolean | undefined;
+
+  /**
+   * Optional TaskManager instance for background shell process registration and management.
+   */
+  readonly taskManager?: TaskManager | undefined;
 
   /**
    * Optional callback invoked by tools when a checkpoint snapshot is created.

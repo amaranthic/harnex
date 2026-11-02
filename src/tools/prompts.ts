@@ -32,7 +32,16 @@ export const editFileDescription =
  */
 export const bashDescription =
   "Executes a bash shell command in the workspace directory. " +
-  "Captures stdout, stderr, and exit code. Supports abort signals and execution timeouts.";
+  "Captures stdout, stderr, and exit code. Supports waitMsBeforeAsync to auto-handoff long-running commands into background tasks, " +
+  "and optional killTimeoutMs (1-15 min) for hard termination.";
+
+/**
+ * System prompt description for TaskManagerTool.
+ */
+export const taskManagerDescription =
+  "Manages background shell tasks spawned by bash commands. " +
+  "Supports listing active and recent tasks, line-paged log inspection with required offset and limit, " +
+  "delivering interactive stdin input, and terminating processes.";
 
 /**
  * System prompt description for GlobTool.

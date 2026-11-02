@@ -152,18 +152,35 @@ Performs surgical, in-place string replacements in workspace files.
 
 ### 5.4 `BashTool` (`bash`)
 
-Executes shell commands inside the workspace root.
+Executes shell commands inside the workspace root with auto-handoff to background tasks.
 
 - **Parameters**:
   - `command` (`string`, required): Shell command string.
-  - `timeoutMs` (`number`, optional): Timeout in milliseconds (default: 60,000 ms).
+  - `waitMsBeforeAsync` (`number`, optional): Foreground wait duration in ms (default: 10,000 ms; 0 = immediate background).
+  - `killTimeoutMs` (`number`, optional): Hard safety kill timeout between 1 minute (60,000 ms) and 15 minutes (900,000 ms).
+  - `timeoutMs` (`number`, optional): Legacy hard timeout in ms (default: 60,000 ms).
 - **Guarantees**:
   - Executes with sanitized environment variables.
   - Streams real-time stdout/stderr chunks through `context.emitProgress`.
   - Captures up to 50,000 characters before truncating with `isTruncated: true`.
   - Spawns subprocesses in detached process groups and sends `SIGTERM` / `SIGKILL` to the process group upon timeout or abort signal.
+  - Automatically hands off long-running commands to `TaskManager` when `waitMsBeforeAsync` is exceeded or set to 0.
 
-### 5.5 `GlobTool` (`glob`)
+### 5.5 `TaskManagerTool` (`taskManager`)
+
+Manages background shell tasks spawned by `BashTool`. Automatically enabled whenever `BashTool` is active; strictly disabled if `BashTool` is absent.
+
+- **Parameters** (discriminated union on `action`):
+  - `action: "list"`: Lists active and recent background tasks with runtime, status, exit code, and totalLines.
+  - `action: "read"`: Line-paged file read of task output logs. Requires `taskId: string`, `offset: number` (1-based), and `limit: number` (up to 500 lines).
+  - `action: "sendInput"`: Delivers text payload into stdin. Requires `taskId: string`, `input: string`, and optional `newline: boolean` (default: `true`).
+  - `action: "stop"`: Terminates the detached process group. Requires `taskId: string` and optional `signal: "SIGTERM" | "SIGKILL"` (default: `"SIGTERM"`).
+- **Guarantees**:
+  - Direct live disk-backed streaming (`output.log`) prevents memory exhaustion.
+  - Strict line-paged retrieval prevents context window flooding.
+  - Process group escalation guarantees stubborn subprocesses are cleanly killed.
+
+### 5.6 `GlobTool` (`glob`)
 
 Fast, pattern-based file discovery within the workspace.
 
@@ -174,7 +191,7 @@ Fast, pattern-based file discovery within the workspace.
   - Automatically ignores noise directories: `node_modules`, `.git`, `.turbo`, `.next`, `dist`, `build`, `.cache`.
   - Enforces a result cap of 250 paths with `isTruncated: true`.
 
-### 5.6 `GrepTool` (`grep`)
+### 5.7 `GrepTool` (`grep`)
 
 Line-by-line regular expression content searching across workspace files.
 

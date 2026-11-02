@@ -17,6 +17,8 @@ import {
   GlobTool,
   GrepTool,
   ReadFileTool,
+  TaskManager,
+  TaskManagerTool,
   ToolExecutionQueue,
   ToolRegistry,
   WriteFileTool,
@@ -103,18 +105,19 @@ describe("ToolExecutionQueue", () => {
 });
 
 describe("ToolRegistry", () => {
-  it("registers all 6 default tools when includeDefaults is true", () => {
+  it("registers all 7 default tools when includeDefaults is true", () => {
     const registry = new ToolRegistry();
     const list = registry.list();
 
-    expect(list.length).toBe(6);
+    expect(list.length).toBe(7);
     expect(registry.has("readFile")).toBe(true);
     expect(registry.has("writeFile")).toBe(true);
     expect(registry.has("editFile")).toBe(true);
     expect(registry.has("bash")).toBe(true);
+    expect(registry.has("taskManager")).toBe(true);
     expect(registry.has("glob")).toBe(true);
     expect(registry.has("grep")).toBe(true);
-    expect(registry.list().length).toBe(6);
+    expect(registry.list().length).toBe(7);
   });
 
   it("starts empty when includeDefaults is false", () => {
@@ -528,5 +531,263 @@ describe("Built-in File & Shell Tools", () => {
     );
     expect(res.matches.length).toBe(3);
     expect(res.isTruncated).toBe(true);
+  });
+
+  describe("TaskManager and Background Shell Integration", () => {
+    it("enforces ToolRegistry coupling between BashTool and TaskManagerTool", () => {
+      const registry = new ToolRegistry({ includeDefaults: false });
+
+      // Cannot register taskManager without bash
+      expect(() => registry.register(new TaskManagerTool())).toThrow(
+        "TaskManagerTool cannot be registered without BashTool",
+      );
+
+      // Registering bash automatically registers taskManager
+      registry.register(new BashTool());
+      expect(registry.has("bash")).toBe(true);
+      expect(registry.has("taskManager")).toBe(true);
+
+      // TaskManager can be unregistered independently while bash remains
+      registry.unregister("taskManager");
+      expect(registry.has("bash")).toBe(true);
+      expect(registry.has("taskManager")).toBe(false);
+
+      // Re-registering taskManager is allowed because bash is active
+      registry.register(new TaskManagerTool());
+      expect(registry.has("taskManager")).toBe(true);
+
+      // Unregistering bash automatically removes taskManager
+      registry.unregister("bash");
+      expect(registry.has("bash")).toBe(false);
+      expect(registry.has("taskManager")).toBe(false);
+    });
+
+    it("launches an immediate background task when waitMsBeforeAsync is 0", async () => {
+      const taskManager = new TaskManager({
+        persist: false,
+        threadId: "test-thread-bg",
+      });
+      const bashTool = new BashTool();
+      const taskTool = new TaskManagerTool();
+      const context = {
+        threadId: "test-thread-bg",
+        toolCallId: "call_1",
+        workingDirectory: testWorkspace,
+        taskManager,
+      };
+
+      const bashRes = await bashTool.execute(
+        {
+          command: 'node -e "setTimeout(() => console.log(\'done\'), 500)"',
+          waitMsBeforeAsync: 0,
+        },
+        context,
+      );
+
+      expect(bashRes.status).toBe("running");
+      expect(bashRes.exitCode).toBeNull();
+      expect(bashRes.taskId).toBeDefined();
+
+      const taskId = bashRes.taskId!;
+
+      // List tasks via TaskManagerTool
+      const listRes = await taskTool.execute({ action: "list" }, context);
+      expect(listRes.action).toBe("list");
+      if (listRes.action === "list") {
+        expect(listRes.tasks.some((t) => t.id === taskId)).toBe(true);
+      }
+
+      await taskManager.shutdown();
+    });
+
+    it("automatically handoffs long-running commands to background after waitMsBeforeAsync", async () => {
+      const taskManager = new TaskManager({
+        persist: false,
+        threadId: "test-thread-handoff",
+      });
+      const bashTool = new BashTool();
+      const context = {
+        threadId: "test-thread-handoff",
+        toolCallId: "call_2",
+        workingDirectory: testWorkspace,
+        taskManager,
+      };
+
+      const bashRes = await bashTool.execute(
+        {
+          command: 'node -e "setTimeout(() => console.log(\'later\'), 400)"',
+          waitMsBeforeAsync: 50,
+        },
+        context,
+      );
+
+      expect(bashRes.status).toBe("running");
+      expect(bashRes.taskId).toBeDefined();
+      expect(bashRes.message).toContain("detached to background task");
+
+      await taskManager.shutdown();
+    });
+
+    it("executes line-paged reads with mandatory offset and limit", async () => {
+      const taskManager = new TaskManager({
+        persist: false,
+        threadId: "test-thread-paged",
+      });
+      const bashTool = new BashTool();
+      const taskTool = new TaskManagerTool();
+      const context = {
+        threadId: "test-thread-paged",
+        toolCallId: "call_3",
+        workingDirectory: testWorkspace,
+        taskManager,
+      };
+
+      // Generate 10 distinct lines in a script
+      const script =
+        'node -e "for(let i=1;i<=10;i++) console.log(\'line_\' + i);"';
+      const bashRes = await bashTool.execute(
+        { command: script, waitMsBeforeAsync: 0 },
+        context,
+      );
+      const taskId = bashRes.taskId!;
+
+      // Wait a moment for the script to finish writing
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      // Read page 1 (lines 1 to 4)
+      const page1 = await taskTool.execute(
+        { action: "read", taskId, offset: 1, limit: 4 },
+        context,
+      );
+      expect(page1.action).toBe("read");
+      if (page1.action === "read") {
+        expect(page1.offset).toBe(1);
+        expect(page1.limit).toBe(4);
+        expect(page1.lines).toEqual(["line_1", "line_2", "line_3", "line_4"]);
+        expect(page1.hasMore).toBe(true);
+      }
+
+      // Read page 2 (lines 5 to 8)
+      const page2 = await taskTool.execute(
+        { action: "read", taskId, offset: 5, limit: 4 },
+        context,
+      );
+      if (page2.action === "read") {
+        expect(page2.offset).toBe(5);
+        expect(page2.lines).toEqual(["line_5", "line_6", "line_7", "line_8"]);
+        expect(page2.hasMore).toBe(true);
+      }
+
+      // Read page 3 (lines 9 to 10)
+      const page3 = await taskTool.execute(
+        { action: "read", taskId, offset: 9, limit: 4 },
+        context,
+      );
+      if (page3.action === "read") {
+        expect(page3.offset).toBe(9);
+        expect(page3.lines).toEqual(["line_9", "line_10"]);
+        expect(page3.hasMore).toBe(false);
+      }
+
+      // Invalid offset < 1 throws error
+      await expect(
+        taskTool.execute(
+          { action: "read", taskId, offset: 0, limit: 5 },
+          context,
+        ),
+      ).rejects.toThrow("Offset must be >= 1");
+
+      await taskManager.shutdown();
+    });
+
+    it("sends interactive stdin input to a running background task", async () => {
+      const taskManager = new TaskManager({
+        persist: false,
+        threadId: "test-thread-stdin",
+      });
+      const bashTool = new BashTool();
+      const taskTool = new TaskManagerTool();
+      const context = {
+        threadId: "test-thread-stdin",
+        toolCallId: "call_4",
+        workingDirectory: testWorkspace,
+        taskManager,
+      };
+
+      // Spawns a process waiting for readline input
+      const script =
+        'node -e "const readline = require(\'readline\'); const rl = readline.createInterface({ input: process.stdin }); rl.on(\'line\', (l) => { process.stdout.write(\'ECHO:\' + l + \'\\n\', () => process.exit(0)); });"';
+
+      const bashRes = await bashTool.execute(
+        { command: script, waitMsBeforeAsync: 0 },
+        context,
+      );
+      const taskId = bashRes.taskId!;
+
+      // Allow node to start listening
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      const inputRes = await taskTool.execute(
+        { action: "sendInput", taskId, input: "secretPayload", newline: true },
+        context,
+      );
+
+      expect(inputRes.action).toBe("sendInput");
+      if (inputRes.action === "sendInput") {
+        expect(inputRes.bytesWritten).toBeGreaterThan(0);
+      }
+
+      // Wait for process to exit and flush echo
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const readRes = await taskTool.execute(
+        { action: "read", taskId, offset: 1, limit: 10 },
+        context,
+      );
+      if (readRes.action === "read") {
+        expect(readRes.lines.some((l) => l.includes("ECHO:secretPayload"))).toBe(
+          true,
+        );
+      }
+
+      await taskManager.shutdown();
+    });
+
+    it("terminates a running background task process tree via stop action", async () => {
+      const taskManager = new TaskManager({
+        persist: false,
+        threadId: "test-thread-stop",
+      });
+      const bashTool = new BashTool();
+      const taskTool = new TaskManagerTool();
+      const context = {
+        threadId: "test-thread-stop",
+        toolCallId: "call_5",
+        workingDirectory: testWorkspace,
+        taskManager,
+      };
+
+      const bashRes = await bashTool.execute(
+        {
+          command: 'node -e "setInterval(() => console.log(\'alive\'), 100)"',
+          waitMsBeforeAsync: 0,
+        },
+        context,
+      );
+      const taskId = bashRes.taskId!;
+
+      // Stop the task
+      const stopRes = await taskTool.execute(
+        { action: "stop", taskId, signal: "SIGTERM" },
+        context,
+      );
+
+      expect(stopRes.action).toBe("stop");
+      if (stopRes.action === "stop") {
+        expect(stopRes.status).toBe("killed");
+      }
+
+      await taskManager.shutdown();
+    });
   });
 });

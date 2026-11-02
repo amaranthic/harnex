@@ -21,6 +21,7 @@ import {
   type RestoreResult,
 } from "../checkpoints/index.js";
 import type { ToolRegistry } from "../tools/index.js";
+import { TaskManager } from "../tools/index.js";
 import type { AgentEngineConfig, RunTurnOptions } from "./engineConfig.js";
 import { runTurn } from "./runTurn.js";
 
@@ -35,6 +36,7 @@ export class AgentEngine {
   private readonly conversationMessages: ModelMessage[];
   private readonly resolvedThreadStore: ThreadStore | undefined;
   private readonly resolvedCheckpointStore: CheckpointStore | undefined;
+  private readonly resolvedTaskManager: TaskManager;
   private readonly isPersistActive: boolean;
   private readonly isCheckpointActive: boolean;
   private turnCounter = 0;
@@ -82,10 +84,18 @@ export class AgentEngine {
       this.resolvedCheckpointStore = undefined;
     }
 
+    this.resolvedTaskManager =
+      config.taskManager ??
+      new TaskManager({
+        threadId: config.threadId,
+        persist: this.isPersistActive,
+      });
+
     this.config = {
       ...config,
       threadStore: this.resolvedThreadStore,
       checkpointStore: this.resolvedCheckpointStore,
+      taskManager: this.resolvedTaskManager,
       persist: this.isPersistActive,
       checkpoint: this.isCheckpointActive,
     };
@@ -247,6 +257,13 @@ export class AgentEngine {
    */
   public get isCheckpointEnabled(): boolean {
     return this.isCheckpointActive;
+  }
+
+  /**
+   * Gets the TaskManager instance associated with this engine session.
+   */
+  public get taskManager(): TaskManager {
+    return this.resolvedTaskManager;
   }
 
   /**

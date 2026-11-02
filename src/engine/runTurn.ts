@@ -586,6 +586,7 @@ export async function* runTurn(
               abortSignal: effectiveSignal,
               checkpointStore: config.checkpointStore,
               isCheckpointEnabled,
+              taskManager: config.taskManager,
               onCheckpointCreated: (cp) => {
                 capturedCheckpoints.push({
                   type: 'checkpointCreated',

@@ -1,6 +1,6 @@
 /**
  * @fileoverview Interactive agent terminal session demonstrating dynamic model switching,
- * reasoning effort configuration, and read-only tool execution with AgentEngine.
+ * reasoning effort configuration, bash command authorization (y/n), and background task management with AgentEngine.
  *
  * Commands:
  *   .model 1              - Switches to Model 1: Google Gemini Flash Lite (google/gemini-flash-lite-latest)
@@ -12,8 +12,8 @@
  *   .exit / .quit         - Terminates the session
  *
  * Usage:
- *   bun run examples/example.ts
- *   bun run examples/example.ts --smoke
+ *   node examples/example.ts
+ *   node examples/example.ts --smoke
  *
  * @packageDocumentation
  */
@@ -23,9 +23,11 @@ import * as readline from "node:readline/promises";
 import {
   AgentEngine,
   type AgentReasoningLevel,
+  BashTool,
   GlobTool,
   GrepTool,
   ReadFileTool,
+  TaskManagerTool,
   ToolRegistry,
 } from "../src/index.js";
 
@@ -141,11 +143,23 @@ function resolveCredentialsForModel(model: string): {
  * Runs the interactive agent terminal loop or smoke test.
  */
 async function main(): Promise<void> {
-  // 1. Build a ToolRegistry with ONLY read-only tools
+  // 1. Build a ToolRegistry with exploration tools, bash, and task management
   const tools = new ToolRegistry({ includeDefaults: false });
   tools.register(new ReadFileTool());
   tools.register(new GlobTool());
   tools.register(new GrepTool());
+  tools.register(new BashTool());
+  tools.register(new TaskManagerTool());
+
+  // Non-network CI smoke mode
+  if (process.argv.includes("--smoke")) {
+    console.log("Hernex example smoke test mode passed successfully.");
+    console.log(`Working Directory: ${process.cwd()}`);
+    console.log(`Registered Tools:  ${tools.list().map((t) => t.name).join(", ")}`);
+    return;
+  }
+
+  const rl = readline.createInterface({ input, output });
 
   // 2. Initial session parameters (defaults to Preset 1)
   let activeModel = modelPresets["1"].modelString;
@@ -154,7 +168,7 @@ async function main(): Promise<void> {
 
   const initialCredentials = resolveCredentialsForModel(activeModel);
 
-  // 3. Instantiate the core engine
+  // 3. Instantiate the core engine with interactive tool authorization hook for bash
   const engine = new AgentEngine({
     threadId: `th_example_${Date.now()}`,
     workingDirectory,
@@ -162,21 +176,38 @@ async function main(): Promise<void> {
     apiKey: initialCredentials.apiKey || "placeholder-key",
     baseUrl: initialCredentials.baseUrl,
     instructions:
-      "You are a read-only exploration assistant with readFile, glob, and grep tools.",
+      "You are an assistant with access to filesystem exploration tools (readFile, glob, grep), " +
+      "bash execution, and background task management (taskManager). " +
+      "For long-running processes or servers, use waitMsBeforeAsync to run in background.",
     tools,
     reasoning: activeReasoningEffort,
+    hooks: {
+      onAuthorizeTool: async (context) => {
+        if (context.toolName === "bash") {
+          const rawParams = context.parameters as { command?: unknown } | undefined;
+          const commandStr =
+            rawParams && typeof rawParams.command === "string"
+              ? rawParams.command
+              : JSON.stringify(context.parameters);
+
+          console.log(`\n[Security] Shell execution proposed: "${commandStr}"`);
+          const answer = await rl.question("Authorize this bash command? (y/n): ");
+          const normalized = answer.trim().toLowerCase();
+
+          if (normalized === "y" || normalized === "yes") {
+            return { decision: "allow" };
+          }
+          return {
+            decision: "deny",
+            reason: `User denied authorization to execute: ${commandStr}`,
+          };
+        }
+
+        // Allow non-bash tools by default
+        return { decision: "allow" };
+      },
+    },
   });
-
-  // Non-network CI smoke mode
-  if (process.argv.includes("--smoke")) {
-    console.log("Hernex example smoke test mode passed successfully.");
-    console.log(`Working Directory: ${workingDirectory}`);
-    console.log(`Registered Tools:  ${tools.list().map((t) => t.name).join(", ")}`);
-    console.log(`Initial Turn Count: ${engine.currentTurn}`);
-    return;
-  }
-
-  const rl = readline.createInterface({ input, output });
 
   console.log("╔══════════════════════════════════════════════════════════════════╗");
   console.log("║               Hernex Agent Core — Interactive Example            ║");
@@ -184,7 +215,7 @@ async function main(): Promise<void> {
   console.log(`Working Directory: ${workingDirectory}`);
   console.log(`Active Model:      ${activeModel} (Preset 1: ${modelPresets["1"].displayName})`);
   console.log(`Reasoning Effort:  ${activeReasoningEffort}`);
-  console.log(`Active Tools:      ${tools.list().map((t) => t.name).join(", ")} (Read-only)`);
+  console.log(`Active Tools:      ${tools.list().map((t) => t.name).join(", ")}`);
   console.log("\nQuick Model Switching:");
   console.log(`  .model 1          - ${modelPresets["1"].displayName} (${modelPresets["1"].modelString}) [Env: ${modelPresets["1"].envVar}]`);
   console.log(`  .model 2          - ${modelPresets["2"].displayName} (${modelPresets["2"].modelString}) [Env: ${modelPresets["2"].envVar}]`);
@@ -307,6 +338,20 @@ async function main(): Promise<void> {
               break;
             case "thoughtDelta":
               process.stdout.write(event.text);
+              break;
+            case "toolCallProposed":
+              console.log(`\n[Tool Proposed: ${event.toolName}]`);
+              break;
+            case "toolExecutionStarted":
+              console.log(`[Tool Executing: ${event.toolName}]`);
+              break;
+            case "toolExecutionDelta":
+              process.stdout.write(event.chunk);
+              break;
+            case "toolExecutionFinished":
+              console.log(
+                `\n[Tool Finished: ${event.toolName}${event.isError ? " (Failed)" : " (Success)"}]`,
+              );
               break;
             case "turnFinished":
               console.log(`\n[Turn Finished: ${event.finishReason}]`);

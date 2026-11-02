@@ -11,6 +11,7 @@ import type {
   ThreadStore,
 } from "../threads/index.js";
 import type { CheckpointStore } from "../checkpoints/index.js";
+import type { TaskManager } from "../tools/index.js";
 import type { ToolRegistry } from "../tools/index.js";
 
 /**
@@ -51,6 +52,11 @@ export interface AgentEngineConfig {
    * Tool registry supplying available agent tools and schema definitions.
    */
   readonly tools: ToolRegistry;
+
+  /**
+   * Optional TaskManager instance for background shell process management.
+   */
+  readonly taskManager?: TaskManager | undefined;
 
   /**
    * Optional consumer lifecycle and authorization hooks.

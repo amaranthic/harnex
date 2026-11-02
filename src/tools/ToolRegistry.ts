@@ -12,6 +12,7 @@ import { EditFileTool } from "./EditFileTool.js";
 import { GlobTool } from "./GlobTool.js";
 import { GrepTool } from "./GrepTool.js";
 import { ReadFileTool } from "./ReadFileTool.js";
+import { TaskManagerTool } from "./TaskManagerTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
 import { ToolExecutionQueue } from "./ToolExecutionQueue.js";
 import { WriteFileTool } from "./WriteFileTool.js";
@@ -101,21 +102,48 @@ export class ToolRegistry {
       throw new Error("Tool name must be a non-empty string.");
     }
     if (this.tools.has(agentTool.name) && !options?.allowOverride) {
+      if (agentTool.name === TaskManagerTool.toolName) {
+        // Allow explicit instance override for auto-associated TaskManagerTool
+        this.tools.set(agentTool.name, agentTool);
+        return;
+      }
       throw new Error(
         `Tool "${agentTool.name}" is already registered. Duplicate tool registration is not allowed. Pass { allowOverride: true } or unregister the tool first.`,
       );
     }
+    if (
+      agentTool.name === TaskManagerTool.toolName &&
+      !this.tools.has(BashTool.toolName)
+    ) {
+      throw new Error(
+        "TaskManagerTool cannot be registered without BashTool. Tasks are associated with bash.",
+      );
+    }
+
     this.tools.set(agentTool.name, agentTool);
+
+    // Auto-associate TaskManagerTool when BashTool is registered
+    if (
+      agentTool.name === BashTool.toolName &&
+      !this.tools.has(TaskManagerTool.toolName)
+    ) {
+      this.tools.set(TaskManagerTool.toolName, new TaskManagerTool());
+    }
   }
 
   /**
    * Unregisters a tool by name.
+   * If BashTool is unregistered, TaskManagerTool is automatically unregistered as well.
    *
    * @param name - The unique name of the tool to remove.
    * @returns True if a tool was found and removed, false otherwise.
    */
   public unregister(name: string): boolean {
-    return this.tools.delete(name);
+    const removed = this.tools.delete(name);
+    if (name === BashTool.toolName && this.tools.has(TaskManagerTool.toolName)) {
+      this.tools.delete(TaskManagerTool.toolName);
+    }
+    return removed;
   }
 
   /**
