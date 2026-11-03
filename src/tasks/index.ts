@@ -7,11 +7,9 @@ export {
   TaskManager,
   defaultRetentionTtlMs,
   defaultMaxRetainedTasks,
+  defaultMaxOutputBytes,
+  defaultTerminationGraceMs,
 } from "./TaskManager.js";
-
-export {
-  taskManagerInputSchema,
-} from "./types.js";
 
 export type {
   ShellTaskStatus,
@@ -20,6 +18,8 @@ export type {
   TaskReadResult,
   TaskSendInputResult,
   TaskStopResult,
+  TaskWaitResult,
+  TaskCreateOptions,
+  CreateTaskInput,
   TaskManagerOptions,
-  TaskManagerInput,
 } from "./types.js";

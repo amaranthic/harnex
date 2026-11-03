@@ -31,17 +31,18 @@ export const editFileDescription =
  * System prompt description for BashTool.
  */
 export const bashDescription =
-  "Executes a bash shell command in the workspace directory. " +
-  "Captures stdout, stderr, and exit code. Supports waitMsBeforeAsync to auto-handoff long-running commands into background tasks, " +
-  "and optional killTimeoutMs (1-15 min) for hard termination.";
+  "Executes a shell command in the workspace directory with the host permissions of the current process user. " +
+  "Environment variables are sanitized, but the shell is not an isolated sandbox. " +
+  "Captures combined output and exit codes. Supports waitMsBeforeAsync to wait in foreground before detaching as a background task, " +
+  "and optional timeoutMs for hard process lifetime.";
 
 /**
  * System prompt description for TaskManagerTool.
  */
 export const taskManagerDescription =
-  "Manages background shell tasks spawned by bash commands. " +
-  "Supports listing active and recent tasks, line-paged log inspection with required offset and limit, " +
-  "delivering interactive stdin input, and terminating processes.";
+  "Manages background shell tasks. " +
+  "Supports spawning new commands, listing active and recent tasks, line-paged log inspection with offset and limit, " +
+  "delivering interactive stdin input, terminating processes, and deleting completed tasks.";
 
 /**
  * System prompt description for GlobTool.

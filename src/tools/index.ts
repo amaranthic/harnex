@@ -12,6 +12,6 @@ export * from "./WriteFileTool.js";
 export * from "./EditFileTool.js";
 export * from "./BashTool.js";
 export * from "./TaskManagerTool.js";
-export * from "./tasks/index.js";
+export * from "../tasks/index.js";
 export * from "./GlobTool.js";
 export * from "./GrepTool.js";

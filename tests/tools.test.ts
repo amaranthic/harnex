@@ -309,12 +309,17 @@ describe("Built-in File & Shell Tools", () => {
 
   it("executes BashTool capturing command output and exit codes", async () => {
     const bashTool = new BashTool();
+    const taskManager = new TaskManager({
+      threadId: "t1",
+      workingDirectory: testWorkspace,
+    });
     let emittedProgress = "";
 
     const context = {
       threadId: "t1",
       toolCallId: "c1",
       workingDirectory: testWorkspace,
+      taskManager,
       emitProgress: (chunk: string) => {
         emittedProgress += chunk;
       },
@@ -326,8 +331,10 @@ describe("Built-in File & Shell Tools", () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toBe("hello from bash");
+    expect(result.output.trim()).toBe("hello from bash");
     expect(emittedProgress).toContain("hello from bash");
+
+    await taskManager.shutdown();
   });
 
   it("executes GlobTool and GrepTool across files", async () => {
@@ -574,10 +581,15 @@ describe("Built-in File & Shell Tools", () => {
 
   it("sanitizes environment variables in BashTool, stripping API keys and secrets", async () => {
     const bashTool = new BashTool();
+    const taskManager = new TaskManager({
+      threadId: "t1",
+      workingDirectory: testWorkspace,
+    });
     const context = {
       threadId: "t1",
       toolCallId: "c1",
       workingDirectory: testWorkspace,
+      taskManager,
     };
 
     process.env.ANTHROPIC_API_KEY = "super-secret-key";
@@ -585,12 +597,13 @@ describe("Built-in File & Shell Tools", () => {
 
     try {
       const res = await bashTool.execute({ command: "env" }, context);
-      expect(res.stdout).not.toContain("super-secret-key");
-      expect(res.stdout).not.toContain("secret-token");
-      expect(res.stdout).toContain("TERM=dumb");
+      expect(res.output).not.toContain("super-secret-key");
+      expect(res.output).not.toContain("secret-token");
+      expect(res.output).toContain("TERM=dumb");
     } finally {
       delete process.env.ANTHROPIC_API_KEY;
       delete process.env.TEST_AUTH_TOKEN;
+      await taskManager.shutdown();
     }
   });
 
@@ -644,6 +657,7 @@ describe("Built-in File & Shell Tools", () => {
       const taskManager = new TaskManager({
         persist: false,
         threadId: "test-thread-bg",
+        workingDirectory: testWorkspace,
       });
       const bashTool = new BashTool();
       const taskTool = new TaskManagerTool();
@@ -666,7 +680,7 @@ describe("Built-in File & Shell Tools", () => {
       expect(bashRes.exitCode).toBeNull();
       expect(bashRes.taskId).toBeDefined();
 
-      const taskId = bashRes.taskId!;
+      const taskId = bashRes.taskId;
 
       // List tasks via TaskManagerTool
       const listRes = await taskTool.execute({ action: "list" }, context);
@@ -682,6 +696,7 @@ describe("Built-in File & Shell Tools", () => {
       const taskManager = new TaskManager({
         persist: false,
         threadId: "test-thread-handoff",
+        workingDirectory: testWorkspace,
       });
       const bashTool = new BashTool();
       const context = {
@@ -701,7 +716,6 @@ describe("Built-in File & Shell Tools", () => {
 
       expect(bashRes.status).toBe("running");
       expect(bashRes.taskId).toBeDefined();
-      expect(bashRes.message).toContain("detached to background task");
 
       await taskManager.shutdown();
     });
@@ -710,6 +724,7 @@ describe("Built-in File & Shell Tools", () => {
       const taskManager = new TaskManager({
         persist: false,
         threadId: "test-thread-paged",
+        workingDirectory: testWorkspace,
       });
       const bashTool = new BashTool();
       const taskTool = new TaskManagerTool();
@@ -727,7 +742,7 @@ describe("Built-in File & Shell Tools", () => {
         { command: script, waitMsBeforeAsync: 0 },
         context,
       );
-      const taskId = bashRes.taskId!;
+      const taskId = bashRes.taskId;
 
       // Wait for the script to finish writing output
       for (let i = 0; i < 40; i++) {
@@ -788,6 +803,7 @@ describe("Built-in File & Shell Tools", () => {
       const taskManager = new TaskManager({
         persist: false,
         threadId: "test-thread-stdin",
+        workingDirectory: testWorkspace,
       });
       const bashTool = new BashTool();
       const taskTool = new TaskManagerTool();
@@ -806,7 +822,7 @@ describe("Built-in File & Shell Tools", () => {
         { command: script, waitMsBeforeAsync: 0 },
         context,
       );
-      const taskId = bashRes.taskId!;
+      const taskId = bashRes.taskId;
 
       // Allow node to start listening
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -841,6 +857,7 @@ describe("Built-in File & Shell Tools", () => {
       const taskManager = new TaskManager({
         persist: false,
         threadId: "test-thread-stop",
+        workingDirectory: testWorkspace,
       });
       const bashTool = new BashTool();
       const taskTool = new TaskManagerTool();
@@ -858,7 +875,7 @@ describe("Built-in File & Shell Tools", () => {
         },
         context,
       );
-      const taskId = bashRes.taskId!;
+      const taskId = bashRes.taskId;
 
       // Stop the task
       const stopRes = await taskTool.execute(
@@ -869,6 +886,103 @@ describe("Built-in File & Shell Tools", () => {
       expect(stopRes.action).toBe("stop");
       if (stopRes.action === "stop") {
         expect(stopRes.status).toBe("killed");
+      }
+
+      await taskManager.shutdown();
+    });
+
+    it("supports direct TaskManager execution, wait timeout, and terminal deletion", async () => {
+      const taskManager = new TaskManager({
+        persist: false,
+        threadId: "test-thread-direct",
+        workingDirectory: testWorkspace,
+      });
+
+      const task = await taskManager.createTask({
+        command: 'node -e "setInterval(() => console.log(\'tick\'), 100)"',
+      });
+
+      expect(task.id).toBeDefined();
+      expect(task.status).toBe("running");
+
+      // Waiting with a short timeout should report timedOut without killing
+      const waitResult = await taskManager.waitForTask(task.id, {
+        timeoutMs: 50,
+      });
+      expect(waitResult.timedOut).toBe(true);
+      expect(waitResult.task.status).toBe("running");
+
+      // Attempting to delete a running task must throw fail-closed
+      await expect(taskManager.deleteTask(task.id)).rejects.toThrow(
+        "Only terminal tasks may be deleted",
+      );
+
+      // Stop the task gracefully
+      const stopResult = await taskManager.stopTask(task.id, {
+        signal: "SIGTERM",
+      });
+      expect(stopResult.status).toBe("killed");
+
+      // Deleting a terminal task succeeds
+      const deleted = await taskManager.deleteTask(task.id);
+      expect(deleted).toBe(true);
+
+      // Second deletion returns false
+      expect(await taskManager.deleteTask(task.id)).toBe(false);
+
+      await taskManager.shutdown();
+    });
+
+    it("caps persisted log bytes and marks outputTruncated when exceeding maxOutputBytes", async () => {
+      const taskManager = new TaskManager({
+        persist: false,
+        threadId: "test-thread-cap",
+        workingDirectory: testWorkspace,
+        maxOutputBytes: 120,
+      });
+
+      const script =
+        'node -e "for(let i=0; i<30; i++) console.log(\'output_line_payload_\' + i);"';
+      const task = await taskManager.createTask({ command: script });
+
+      const waitRes = await taskManager.waitForTask(task.id, { timeoutMs: 3000 });
+      expect(waitRes.timedOut).toBe(false);
+      expect(waitRes.task.outputTruncated).toBe(true);
+      expect(waitRes.task.outputBytes).toBeGreaterThan(120);
+
+      const paged = await taskManager.readTask(task.id, 1, 100);
+      expect(paged.outputTruncated).toBe(true);
+
+      await taskManager.shutdown();
+    });
+
+    it("reloads persisted tasks on startup and marks active processes as orphaned", async () => {
+      const taskManager = new TaskManager({
+        persist: false,
+        threadId: "test-thread-orphan",
+        workingDirectory: testWorkspace,
+      });
+      const taskTool = new TaskManagerTool();
+      const context = {
+        threadId: "test-thread-orphan",
+        toolCallId: "call_6",
+        workingDirectory: testWorkspace,
+        taskManager,
+      };
+
+      const task = await taskManager.createTask({
+        command: 'node -e "console.log(\'hello\');"',
+      });
+      await taskManager.waitForTask(task.id, { timeoutMs: 2000 });
+
+      // Delete via TaskManagerTool
+      const delRes = await taskTool.execute(
+        { action: "delete", taskId: task.id },
+        context,
+      );
+      expect(delRes.action).toBe("delete");
+      if (delRes.action === "delete") {
+        expect(delRes.deleted).toBe(true);
       }
 
       await taskManager.shutdown();

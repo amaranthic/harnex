@@ -6,7 +6,7 @@
  */
 
 import type { CheckpointStore } from "../checkpoints/index.js";
-import type { TaskManager } from "./tasks/TaskManager.js";
+import type { TaskManager } from "../tasks/TaskManager.js";
 
 /**
  * Execution context supplied to every tool execution.

@@ -77,6 +77,7 @@ export class AgentEngine {
       config.taskManager ??
       new TaskManager({
         threadId: config.threadId,
+        workingDirectory: config.workingDirectory,
         persist: this.isPersistActive,
       });
 
