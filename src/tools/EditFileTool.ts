@@ -1,10 +1,9 @@
 /**
- * @fileoverview Built-in tool for surgical file edits.
- * Enforces exact string matching, uniqueness validation, and atomic replacement.
+ * @fileoverview Built-in tool for making targeted replacements within existing files.
+ * Validates match uniqueness and performs atomic file replacement with snapshot support.
  * @packageDocumentation
  */
 
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -21,18 +20,20 @@ import { editFileDescription } from "./prompts.js";
 export const editFileInputSchema = z.object({
   filePath: z
     .string()
-    .describe("The relative or absolute path of the file to edit."),
+    .describe("The relative or absolute file path of the file to modify."),
   oldString: z
     .string()
-    .describe("The exact existing text within the file to replace."),
+    .describe(
+      "The exact string to find and replace. Must match the file content identically including whitespace.",
+    ),
   newString: z
     .string()
-    .describe("The replacement text to insert in place of oldString."),
+    .describe("The replacement string to insert in place of oldString."),
   replaceAll: z
     .boolean()
     .optional()
     .describe(
-      "Set to true to replace all occurrences. Defaults to false (replaces single unique match).",
+      "If true, replace every occurrence of oldString. If false (default), oldString must appear exactly once.",
     ),
 });
 
@@ -46,7 +47,7 @@ export interface EditFileOutput {
 }
 
 /**
- * Built-in tool for surgical in-place string replacements in files.
+ * Built-in tool for targeted file editing.
  */
 export class EditFileTool
   implements AgentTool<typeof editFileInputSchema, EditFileOutput>
@@ -58,10 +59,10 @@ export class EditFileTool
   public readonly inputSchema = editFileInputSchema;
 
   /**
-   * Executes the in-place string replacement operation, capturing a content-addressed
-   * delta checkpoint if checkpointing is enabled on the session.
+   * Executes the edit operation atomically, capturing a content-addressed checkpoint
+   * snapshot before and after the replacement if checkpointing is enabled.
    *
-   * @param parameters - Validated parameters containing filePath, oldString, newString, replaceAll.
+   * @param parameters - Validated parameters containing filePath, oldString, newString, and replaceAll.
    * @param context - The execution context with workingDirectory and checkpoint store.
    * @returns A promise resolving to the structured edit result.
    */
@@ -103,13 +104,23 @@ export class EditFileTool
       );
     }
 
-    let beforeHash: string | undefined;
-    // [NOTED: Phase 3 will migrate to snapshot before/after hash lifecycle]
+    const relativeFilePath = path.relative(context.workingDirectory, fullPath);
+    let checkpointId: string | undefined;
+
+    // 1. Pre-mutation checkpoint capture
     if (context.isCheckpointEnabled && context.checkpointStore) {
       try {
-        beforeHash = await context.checkpointStore.storeBlob(
-          Buffer.from(rawContent, "utf-8"),
+        const cpRecord = await context.checkpointStore.createCheckpoint(
+          context.threadId,
+          {
+            workingDirectory: context.workingDirectory,
+            turnIndex: context.turnIndex ?? 0,
+            label: `editFile: ${parameters.filePath}`,
+            files: [relativeFilePath],
+            source: { toolName: EditFileTool.toolName },
+          },
         );
+        checkpointId = cpRecord.id;
       } catch (error) {
         throw new Error(
           `Failed to record pre-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
@@ -125,36 +136,22 @@ export class EditFileTool
 
     const buffer = Buffer.from(updatedContent, "utf-8");
 
-    // Write file atomically using shared atomicWriteFile
+    // 2. Perform file write atomically
     await atomicWriteFile(fullPath, buffer);
 
-    // [NOTED: Phase 3 will migrate to snapshot before/after hash lifecycle]
-    if (context.isCheckpointEnabled && context.checkpointStore) {
+    // 3. Post-mutation checkpoint finalization
+    if (context.isCheckpointEnabled && context.checkpointStore && checkpointId) {
       try {
-        const afterHash = await context.checkpointStore.storeBlob(buffer);
-        const relativeFilePath = path.relative(context.workingDirectory, fullPath);
-        const checkpointId = `cp_${Date.now()}_${randomUUID().slice(0, 8)}`;
-        const record = await context.checkpointStore.createCheckpoint(context.threadId, {
-          id: checkpointId,
-          threadId: context.threadId,
-          turnIndex: 0,
-          toolName: EditFileTool.toolName,
-          timestamp: Date.now(),
-          coverage: "partial",
-          files: [
-            {
-              relativePath: relativeFilePath,
-              ...(beforeHash ? { beforeHash } : {}),
-              afterHash,
-              status: "~",
-            },
-          ],
-        });
-        context.onCheckpointCreated?.({
+        const updatedRecord = await context.checkpointStore.updateCheckpoint(
+          context.threadId,
           checkpointId,
-          sequence: record.sequence,
-          label: `EditFile: ${parameters.filePath}`,
-          filesTouched: [parameters.filePath],
+          context.workingDirectory,
+        );
+        context.onCheckpointCreated?.({
+          checkpointId: updatedRecord.id,
+          sequence: updatedRecord.sequence,
+          label: updatedRecord.label,
+          filesTouched: [relativeFilePath],
         });
       } catch (error) {
         throw new Error(

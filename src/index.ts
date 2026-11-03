@@ -123,6 +123,7 @@ export {
 export type {
   CheckpointFileRecord,
   CheckpointRecord,
+  CreateCheckpointInput,
   RestoreFileAction,
   RestorePlan,
   RestoreResult,

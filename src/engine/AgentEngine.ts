@@ -3,23 +3,16 @@
  * @packageDocumentation
  */
 
-import { randomUUID } from "node:crypto";
 import type { LanguageModel, ModelMessage } from "../model/types.js";
 import type { AgentEvent } from "../events/index.js";
 import {
   FileThreadStore,
   type AgentReasoningLevel,
-  type ThreadMetadata,
   type ThreadStore,
-  type TranscriptEntry,
-  type UpdateThreadInput,
 } from "../threads/index.js";
 import {
   FileCheckpointStore,
-  type CheckpointRecord,
   type CheckpointStore,
-  type RestorePlan,
-  type RestoreResult,
 } from "../checkpoints/index.js";
 import type { ToolRegistry } from "../tools/index.js";
 import { TaskManager } from "../tools/index.js";
@@ -288,156 +281,25 @@ export class AgentEngine {
   }
 
   /**
-   * Appends an external message into the in-memory conversation history.
+   * Appends an external message into the conversation history.
+   * If threadStore is present, appends to the persistent transcript first.
    *
    * @param message - The ModelMessage to append.
    */
-  public addMessage(message: ModelMessage): void {
+  public async addMessage(message: ModelMessage): Promise<void> {
     if (this.isTurnRunning) {
       throw new Error(
         "Cannot add messages to conversation history while an active turn is running.",
       );
     }
+    if (this.resolvedThreadStore) {
+      await this.resolvedThreadStore.appendTranscript(this.threadId, {
+        type: "modelMessage",
+        message,
+        timestamp: Date.now(),
+      });
+    }
     this.conversationMessages.push(message);
-  }
-
-  /**
-   * Clears all conversational messages from the active thread history.
-   */
-  public clearMessages(): void {
-    if (this.isTurnRunning) {
-      throw new Error(
-        "Cannot clear conversation messages while an active turn is running.",
-      );
-    }
-    this.conversationMessages.length = 0;
-  }
-
-  /**
-   * Fetches persisted metadata for the current thread session.
-   *
-   * @returns The ThreadMetadata object if persisted, or undefined if ephemeral.
-   */
-  public async getMetadata(): Promise<ThreadMetadata | undefined> {
-    if (!this.resolvedThreadStore) {
-      return undefined;
-    }
-    return await this.resolvedThreadStore.getThread(this.threadId);
-  }
-
-  /**
-   * Updates metadata fields for the active thread session.
-   *
-   * @param patch - Partial metadata attributes to update.
-   * @returns The updated ThreadMetadata object, or undefined if ephemeral.
-   */
-  public async updateMetadata(
-    patch: UpdateThreadInput,
-  ): Promise<ThreadMetadata | undefined> {
-    if (!this.resolvedThreadStore) {
-      return undefined;
-    }
-    return await this.resolvedThreadStore.updateThread(
-      this.threadId,
-      patch,
-    );
-  }
-
-  /**
-   * Loads the full authoritative transcript log for this thread.
-   *
-   * @returns Readonly array of TranscriptEntry records.
-   */
-  public async getTranscript(): Promise<readonly TranscriptEntry[]> {
-    if (!this.resolvedThreadStore) {
-      return [];
-    }
-    return await this.resolvedThreadStore.getTranscript(this.threadId);
-  }
-
-  /**
-   * Lists all recorded checkpoints for the active thread session.
-   *
-   * @returns Readonly array of CheckpointRecord snapshots.
-   */
-  public async listCheckpoints(): Promise<readonly CheckpointRecord[]> {
-    if (!this.resolvedCheckpointStore) {
-      return [];
-    }
-    return await this.resolvedCheckpointStore.listCheckpoints(this.threadId);
-  }
-
-  /**
-   * Generates a dry-run restore plan for a specific checkpoint with external conflict detection.
-   *
-   * @param checkpointId - Checkpoint identifier to plan restore for.
-   * @returns A RestorePlan detailing file operations and conflict flags.
-   */
-  public async planRestore(checkpointId: string): Promise<RestorePlan> {
-    if (!this.resolvedCheckpointStore) {
-      throw new Error(
-        `Cannot plan restore: checkpoints are not enabled on engine thread "${this.threadId}".`,
-      );
-    }
-    return await this.resolvedCheckpointStore.planRestore(
-      this.threadId,
-      checkpointId,
-      this.workingDirectory,
-    );
-  }
-
-  /**
-   * Reverts workspace files to the exact state captured in a past checkpoint snapshot.
-   *
-   * @param checkpointId - Checkpoint identifier to restore.
-   * @param options - Restore options, such as `{ force: true }` to overwrite uncommitted external edits.
-   * @returns A RestoreResult detailing restored files and ignored conflicts.
-   */
-  public async restoreCheckpoint(
-    checkpointId: string,
-    options?: { readonly force?: boolean },
-  ): Promise<RestoreResult> {
-    if (!this.resolvedCheckpointStore) {
-      throw new Error(
-        `Cannot restore checkpoint: checkpoints are not enabled on engine thread "${this.threadId}".`,
-      );
-    }
-    return await this.resolvedCheckpointStore.restoreCheckpoint(
-      this.threadId,
-      checkpointId,
-      this.workingDirectory,
-      options,
-    );
-  }
-
-  /**
-   * Programmatically creates a manual checkpoint record for the active session.
-   *
-   * @param options - Label and optional file list for the snapshot.
-   * @returns The created CheckpointRecord.
-   */
-  public async createCheckpoint(options: {
-    readonly label?: string;
-    readonly files?: readonly string[];
-  }): Promise<CheckpointRecord> {
-    if (!this.resolvedCheckpointStore) {
-      throw new Error(
-        `Cannot create checkpoint: checkpoints are not enabled on engine thread "${this.threadId}".`,
-      );
-    }
-
-    return await this.resolvedCheckpointStore.createCheckpoint(this.threadId, {
-      id: `cp_${Date.now()}_${randomUUID().slice(0, 8)}`,
-      threadId: this.threadId,
-      turnIndex: this.turnCounter,
-      toolName: "manualCheckpoint",
-      timestamp: Date.now(),
-      coverage: options.files && options.files.length > 0 ? "partial" : "complete",
-      files: (options.files ?? []).map((file) => ({
-        relativePath: file,
-        status: "~",
-      })),
-    });
   }
 
   /**

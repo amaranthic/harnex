@@ -3,41 +3,121 @@
  * @packageDocumentation
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import {
+  HernexCheckpointConflictError,
+  HernexStoreError,
+} from "../errors.js";
 import { atomicWriteFile } from "../storage/atomicFile.js";
-import { resolveHomeDirectory } from "../storage/homeDirectory.js";
+import {
+  resolveHomeDirectory,
+  type ResolveHomeDirectoryOptions,
+} from "../storage/homeDirectory.js";
 import { withFileLock } from "../storage/lock.js";
+import { resolvePathWithinWorkspace } from "../tools/internal/pathGuard.js";
 import type {
+  CheckpointFileRecord,
   CheckpointRecord,
   CheckpointStore,
+  CreateCheckpointInput,
   RestoreFileAction,
   RestorePlan,
   RestoreResult,
 } from "./types.js";
 
+/** Identifier grammar validation regex. */
+const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/** SHA-256 hash validation regex. */
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+/**
+ * Persisted manifest envelope format version 2.
+ */
+interface CheckpointManifestEnvelope {
+  readonly version: 2;
+  readonly checkpoints: readonly CheckpointRecord[];
+}
+
+/**
+ * FileCheckpointStore provides persistent content-addressed checkpointing
+ * and rollback verification across thread-scoped workspace files.
+ */
 export class FileCheckpointStore implements CheckpointStore {
   private readonly rootDir: string;
 
-  public constructor(options?: { readonly homeDirectory?: string }) {
+  /**
+   * Initializes a new FileCheckpointStore instance.
+   *
+   * @param options - Storage options including custom home directory.
+   */
+  public constructor(options?: ResolveHomeDirectoryOptions) {
     this.rootDir = resolveHomeDirectory(options);
   }
 
-  private getManifestPath(threadId: string): string {
-    return path.join(this.rootDir, "threads", threadId, "checkpoints", "manifest.json");
+  /**
+   * Validates safe identifier grammar for threads and checkpoints.
+   *
+   * @param id - Identifier string.
+   * @param label - Human-readable label for error reporting.
+   */
+  private validateId(id: string, label: string): void {
+    if (!id || typeof id !== "string" || !SAFE_ID_PATTERN.test(id)) {
+      throw new Error(`Invalid ${label} identifier: "${id}"`);
+    }
   }
 
+  /**
+   * Validates SHA-256 hexadecimal hash strings.
+   *
+   * @param hash - Hash string to validate.
+   */
+  private validateSha256(hash: string): void {
+    if (!hash || typeof hash !== "string" || !SHA256_PATTERN.test(hash)) {
+      throw new Error(`Invalid SHA-256 hash: "${hash}"`);
+    }
+  }
+
+  /**
+   * Resolves the manifest file path for a thread.
+   */
+  private getManifestPath(threadId: string): string {
+    this.validateId(threadId, "thread");
+    return path.join(
+      this.rootDir,
+      "threads",
+      threadId,
+      "checkpoints",
+      "manifest.json",
+    );
+  }
+
+  /**
+   * Resolves the content-addressed blob storage path for a given SHA-256 digest.
+   */
   private getBlobPath(sha256: string): string {
+    this.validateSha256(sha256);
     return path.join(this.rootDir, "blobs", "sha256", sha256);
   }
 
   /**
-   * Stores raw data in the content-addressed blob store.
+   * Resolves the external lock path for thread checkpoint operations.
    */
-  public async storeBlob(data: Buffer | Uint8Array): Promise<string> {
+  private getLockPath(threadId: string): string {
+    this.validateId(threadId, "thread");
+    return path.join(this.rootDir, "locks", "checkpoints", `${threadId}.lock`);
+  }
+
+  /**
+   * Stores raw data in the content-addressed blob store with SHA-256 digest validation.
+   */
+  private async storeBlob(data: Buffer | Uint8Array): Promise<string> {
     const hash = createHash("sha256").update(data).digest("hex");
+    this.validateSha256(hash);
+
     const blobPath = this.getBlobPath(hash);
     if (!existsSync(blobPath)) {
       await atomicWriteFile(blobPath, data);
@@ -46,100 +126,299 @@ export class FileCheckpointStore implements CheckpointStore {
   }
 
   /**
-   * Reads a raw blob from the content-addressed store.
+   * Reads a raw blob from the content-addressed store and verifies its integrity.
    */
-  public async readBlob(sha256: string): Promise<Buffer> {
+  private async readBlob(sha256: string): Promise<Buffer> {
+    this.validateSha256(sha256);
     const blobPath = this.getBlobPath(sha256);
     if (!existsSync(blobPath)) {
       throw new Error(`Blob not found: "${sha256}"`);
     }
-    return await readFile(blobPath);
+
+    const content = await readFile(blobPath);
+    const computedHash = createHash("sha256").update(content).digest("hex");
+    if (computedHash !== sha256) {
+      throw new Error(
+        `Corrupt blob detected for "${sha256}": computed digest is "${computedHash}"`,
+      );
+    }
+
+    return content;
   }
 
-  public async listCheckpoints(
+  /**
+   * Internal unlocked helper to read and validate the thread checkpoint manifest.
+   */
+  private async readManifestUnlocked(
     threadId: string,
   ): Promise<readonly CheckpointRecord[]> {
     const manifestPath = this.getManifestPath(threadId);
     if (!existsSync(manifestPath)) {
       return [];
     }
+
     const raw = await readFile(manifestPath, "utf-8");
-    return JSON.parse(raw) as CheckpointRecord[];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (parseError) {
+      throw new HernexStoreError(
+        `Failed to parse checkpoint manifest at "${manifestPath}": ${String(parseError)}`,
+      );
+    }
+
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("version" in parsed) ||
+      (parsed as { version: unknown }).version !== 2
+    ) {
+      throw new HernexStoreError(
+        `Incompatible checkpoint manifest version at "${manifestPath}". Expected version 2 envelope. Legacy unverified records cannot be migrated.`,
+      );
+    }
+
+    const envelope = parsed as CheckpointManifestEnvelope;
+    if (!Array.isArray(envelope.checkpoints)) {
+      throw new HernexStoreError(
+        `Malformed checkpoint manifest envelope at "${manifestPath}": checkpoints is not an array.`,
+      );
+    }
+
+    return envelope.checkpoints;
   }
 
+  /**
+   * Internal unlocked helper to save checkpoint manifest under the version 2 envelope.
+   */
+  private async writeManifestUnlocked(
+    threadId: string,
+    checkpoints: readonly CheckpointRecord[],
+  ): Promise<void> {
+    const manifestPath = this.getManifestPath(threadId);
+    const envelope: CheckpointManifestEnvelope = {
+      version: 2,
+      checkpoints,
+    };
+    await atomicWriteFile(manifestPath, JSON.stringify(envelope, null, 2));
+  }
+
+  /**
+   * Lists all recorded checkpoints for a thread ordered chronologically under lock.
+   */
+  public async listCheckpoints(
+    threadId: string,
+  ): Promise<readonly CheckpointRecord[]> {
+    this.validateId(threadId, "thread");
+    const lockPath = this.getLockPath(threadId);
+
+    return await withFileLock(lockPath, async () => {
+      return this.readManifestUnlocked(threadId);
+    });
+  }
+
+  /**
+   * Retrieves a checkpoint record by thread and checkpoint identifier under lock.
+   */
   public async getCheckpoint(
     threadId: string,
     checkpointId: string,
   ): Promise<CheckpointRecord | undefined> {
-    const list = await this.listCheckpoints(threadId);
-    return list.find((cp) => cp.id === checkpointId);
-  }
-
-  public async createCheckpoint(
-    threadId: string,
-    checkpoint: Omit<CheckpointRecord, "sequence">,
-  ): Promise<CheckpointRecord> {
-    const manifestPath = this.getManifestPath(threadId);
-    const lockPath = path.join(
-      this.rootDir,
-      "threads",
-      threadId,
-      "checkpoints",
-      ".checkpoint.lock",
-    );
+    this.validateId(threadId, "thread");
+    this.validateId(checkpointId, "checkpoint");
+    const lockPath = this.getLockPath(threadId);
 
     return await withFileLock(lockPath, async () => {
-      const list = (await this.listCheckpoints(threadId)) as CheckpointRecord[];
-      const sequence = list.length + 1;
-      const fullRecord: CheckpointRecord = {
-        ...checkpoint,
-        sequence,
-      };
-
-      list.push(fullRecord);
-      await atomicWriteFile(manifestPath, JSON.stringify(list, null, 2));
-      return fullRecord;
+      const list = await this.readManifestUnlocked(threadId);
+      return list.find((cp) => cp.id === checkpointId);
     });
   }
 
-  public async planRestore(
+  /**
+   * Records a pre-mutation snapshot of the specified workspace files under lock.
+   */
+  public async createCheckpoint(
+    threadId: string,
+    input: CreateCheckpointInput,
+  ): Promise<CheckpointRecord> {
+    this.validateId(threadId, "thread");
+    if (!input.files || input.files.length === 0) {
+      throw new Error("Checkpoint creation requires at least one relative file path.");
+    }
+
+    const lockPath = this.getLockPath(threadId);
+
+    return await withFileLock(lockPath, async () => {
+      const list = await this.readManifestUnlocked(threadId);
+      const sequence = list.length > 0 ? list[list.length - 1]!.sequence + 1 : 1;
+      const checkpointId = randomUUID();
+
+      const fileRecords: CheckpointFileRecord[] = [];
+
+      for (const relPath of input.files) {
+        if (!relPath || typeof relPath !== "string") {
+          throw new Error("Invalid relative file path in checkpoint input.");
+        }
+
+        // Validate containment within workspace
+        const targetPath = resolvePathWithinWorkspace(
+          relPath,
+          input.workingDirectory,
+        );
+
+        if (existsSync(targetPath)) {
+          const content = await readFile(targetPath);
+          const hash = await this.storeBlob(content);
+          fileRecords.push({
+            relativePath: relPath,
+            beforeHash: hash,
+            afterHash: hash,
+          });
+        } else {
+          fileRecords.push({
+            relativePath: relPath,
+            beforeHash: null,
+            afterHash: null,
+          });
+        }
+      }
+
+      const record: CheckpointRecord = {
+        id: checkpointId,
+        sequence,
+        threadId,
+        turnIndex: input.turnIndex,
+        label: input.label,
+        source: input.source ?? "manual",
+        timestamp: Date.now(),
+        files: fileRecords,
+      };
+
+      const updatedList = [...list, record];
+      await this.writeManifestUnlocked(threadId, updatedList);
+
+      return record;
+    });
+  }
+
+  /**
+   * Updates an existing checkpoint after mutation with the post-state file hashes.
+   */
+  public async updateCheckpoint(
     threadId: string,
     checkpointId: string,
     workingDirectory: string,
-  ): Promise<RestorePlan> {
-    const cp = await this.getCheckpoint(threadId, checkpointId);
-    if (!cp) {
-      throw new Error(`Checkpoint not found: "${checkpointId}"`);
-    }
+  ): Promise<CheckpointRecord> {
+    this.validateId(threadId, "thread");
+    this.validateId(checkpointId, "checkpoint");
+    const lockPath = this.getLockPath(threadId);
 
+    return await withFileLock(lockPath, async () => {
+      const list = await this.readManifestUnlocked(threadId);
+      const index = list.findIndex((cp) => cp.id === checkpointId);
+      if (index === -1) {
+        throw new Error(`Checkpoint not found: "${checkpointId}"`);
+      }
+
+      const existing = list[index]!;
+      const updatedFiles: CheckpointFileRecord[] = [];
+
+      for (const file of existing.files) {
+        const targetPath = resolvePathWithinWorkspace(
+          file.relativePath,
+          workingDirectory,
+        );
+
+        if (existsSync(targetPath)) {
+          const content = await readFile(targetPath);
+          const hash = await this.storeBlob(content);
+          updatedFiles.push({
+            relativePath: file.relativePath,
+            beforeHash: file.beforeHash,
+            afterHash: hash,
+          });
+        } else {
+          updatedFiles.push({
+            relativePath: file.relativePath,
+            beforeHash: file.beforeHash,
+            afterHash: null,
+          });
+        }
+      }
+
+      const updatedRecord: CheckpointRecord = {
+        ...existing,
+        files: updatedFiles,
+      };
+
+      const updatedList = [...list];
+      updatedList[index] = updatedRecord;
+      await this.writeManifestUnlocked(threadId, updatedList);
+
+      return updatedRecord;
+    });
+  }
+
+  /**
+   * Deletes a checkpoint record from the thread manifest under lock.
+   */
+  public async deleteCheckpoint(
+    threadId: string,
+    checkpointId: string,
+  ): Promise<boolean> {
+    this.validateId(threadId, "thread");
+    this.validateId(checkpointId, "checkpoint");
+    const lockPath = this.getLockPath(threadId);
+
+    return await withFileLock(lockPath, async () => {
+      const list = await this.readManifestUnlocked(threadId);
+      const filtered = list.filter((cp) => cp.id !== checkpointId);
+      if (filtered.length === list.length) {
+        return false;
+      }
+      await this.writeManifestUnlocked(threadId, filtered);
+      return true;
+    });
+  }
+
+  /**
+   * Internal unlocked helper to compute the restore plan for a checkpoint.
+   */
+  private async planRestoreUnlocked(
+    checkpoint: CheckpointRecord,
+    workingDirectory: string,
+  ): Promise<RestorePlan> {
     const actions: RestoreFileAction[] = [];
     let hasConflicts = false;
 
-    for (const file of cp.files) {
-      const targetPath = path.resolve(workingDirectory, file.relativePath);
-      const targetExists = existsSync(targetPath);
+    for (const file of checkpoint.files) {
+      const targetPath = resolvePathWithinWorkspace(
+        file.relativePath,
+        workingDirectory,
+      );
 
-      let currentHash: string | undefined;
-      if (targetExists) {
-        const buf = await readFile(targetPath);
-        currentHash = createHash("sha256").update(buf).digest("hex");
+      let currentHash: string | null = null;
+      if (existsSync(targetPath)) {
+        const content = await readFile(targetPath);
+        currentHash = createHash("sha256").update(content).digest("hex");
       }
 
-      // Conflict detection: if file was mutated by external editor since checkpoint
-      const isConflict =
-        Boolean(file.afterHash && currentHash && currentHash !== file.afterHash);
+      const alreadyRestored = currentHash === file.beforeHash;
+      const isConflict = !alreadyRestored && currentHash !== file.afterHash;
 
       if (isConflict) {
         hasConflicts = true;
       }
 
-      let action: "create" | "modify" | "delete" = "modify";
-      if (!file.beforeHash) {
-        // Was created by the tool, so restore deletes it
-        action = "delete";
-      } else if (!targetExists) {
-        // Was deleted or does not exist, so restore creates it
+      let action: "unchanged" | "create" | "modify" | "delete";
+      if (file.beforeHash === null) {
+        action = currentHash === null ? "unchanged" : "delete";
+      } else if (currentHash === null) {
         action = "create";
+      } else if (currentHash === file.beforeHash) {
+        action = "unchanged";
+      } else {
+        action = "modify";
       }
 
       actions.push({
@@ -150,59 +429,138 @@ export class FileCheckpointStore implements CheckpointStore {
     }
 
     return {
-      checkpointId,
+      checkpointId: checkpoint.id,
       actions,
       hasConflicts,
     };
   }
 
+  /**
+   * Preflights and plans the restoration of a checkpoint under lock.
+   */
+  public async planRestore(
+    threadId: string,
+    checkpointId: string,
+    workingDirectory: string,
+  ): Promise<RestorePlan> {
+    this.validateId(threadId, "thread");
+    this.validateId(checkpointId, "checkpoint");
+    const lockPath = this.getLockPath(threadId);
+
+    return await withFileLock(lockPath, async () => {
+      const list = await this.readManifestUnlocked(threadId);
+      const cp = list.find((item) => item.id === checkpointId);
+      if (!cp) {
+        throw new Error(`Checkpoint not found: "${checkpointId}"`);
+      }
+      return this.planRestoreUnlocked(cp, workingDirectory);
+    });
+  }
+
+  /**
+   * Restores workspace files to their recorded pre-mutation state under lock.
+   */
   public async restoreCheckpoint(
     threadId: string,
     checkpointId: string,
     workingDirectory: string,
-    options?: { readonly force?: boolean },
+    options?: { readonly force?: boolean } | undefined,
   ): Promise<RestoreResult> {
-    const plan = await this.planRestore(
-      threadId,
-      checkpointId,
-      workingDirectory,
-    );
-    if (plan.hasConflicts && !options?.force) {
-      throw new Error(
-        `Restore conflicts detected in checkpoint "${checkpointId}". Pass { force: true } to overwrite uncommitted external changes.`,
-      );
-    }
+    this.validateId(threadId, "thread");
+    this.validateId(checkpointId, "checkpoint");
+    const lockPath = this.getLockPath(threadId);
 
-    const cp = (await this.getCheckpoint(threadId, checkpointId))!;
-    let filesRestored = 0;
-    let conflictsIgnored = 0;
-
-    for (const file of cp.files) {
-      const targetPath = path.resolve(workingDirectory, file.relativePath);
-      const actionItem = plan.actions.find(
-        (a) => a.relativePath === file.relativePath,
-      );
-
-      if (actionItem?.isConflict) {
-        conflictsIgnored++;
+    return await withFileLock(lockPath, async () => {
+      const list = await this.readManifestUnlocked(threadId);
+      const cp = list.find((item) => item.id === checkpointId);
+      if (!cp) {
+        throw new Error(`Checkpoint not found: "${checkpointId}"`);
       }
 
-      if (actionItem?.action === "delete") {
-        if (existsSync(targetPath)) {
-          await unlink(targetPath);
-          filesRestored++;
+      const plan = await this.planRestoreUnlocked(cp, workingDirectory);
+      if (plan.hasConflicts && !options?.force) {
+        throw new HernexCheckpointConflictError(
+          `Restore conflicts detected in checkpoint "${checkpointId}". Pass { force: true } to overwrite uncommitted external changes.`,
+        );
+      }
+
+      // Preflight: Stage all required blobs and validate paths before mutating
+      const stagedBlobs = new Map<string, Buffer>();
+      for (const file of cp.files) {
+        // Path validation
+        resolvePathWithinWorkspace(file.relativePath, workingDirectory);
+
+        const actionItem = plan.actions.find(
+          (a) => a.relativePath === file.relativePath,
+        );
+        if (
+          actionItem &&
+          (actionItem.action === "create" || actionItem.action === "modify")
+        ) {
+          if (!file.beforeHash) {
+            throw new Error(
+              `Missing beforeHash for restore action "${actionItem.action}" on path "${file.relativePath}".`,
+            );
+          }
+          if (!stagedBlobs.has(file.beforeHash)) {
+            const blobBytes = await this.readBlob(file.beforeHash);
+            stagedBlobs.set(file.beforeHash, blobBytes);
+          }
         }
-      } else if (file.beforeHash) {
-        const blobContent = await this.readBlob(file.beforeHash);
-        await atomicWriteFile(targetPath, blobContent);
-        filesRestored++;
       }
-    }
 
-    return {
-      success: true,
-      filesRestored,
-      conflictsIgnored,
-    };
+      // Execution: perform mutations and track progress
+      let filesRestored = 0;
+      let filesDeleted = 0;
+      let conflictsOverwritten = 0;
+      const committedPaths: string[] = [];
+
+      try {
+        for (const file of cp.files) {
+          const targetPath = resolvePathWithinWorkspace(
+            file.relativePath,
+            workingDirectory,
+          );
+          const actionItem = plan.actions.find(
+            (a) => a.relativePath === file.relativePath,
+          );
+          if (!actionItem) {
+            continue;
+          }
+
+          if (actionItem.isConflict) {
+            conflictsOverwritten++;
+          }
+
+          if (actionItem.action === "delete") {
+            if (existsSync(targetPath)) {
+              await unlink(targetPath);
+              filesDeleted++;
+              committedPaths.push(file.relativePath);
+            }
+          } else if (
+            actionItem.action === "create" ||
+            actionItem.action === "modify"
+          ) {
+            const blobBytes = stagedBlobs.get(file.beforeHash!)!;
+            await atomicWriteFile(targetPath, blobBytes);
+            filesRestored++;
+            committedPaths.push(file.relativePath);
+          }
+        }
+      } catch (mutationError) {
+        throw new AggregateError(
+          [mutationError],
+          `Restore failed during filesystem mutations. Committed paths: ${committedPaths.join(", ")}`,
+        );
+      }
+
+      return {
+        checkpointId,
+        filesRestored,
+        filesDeleted,
+        conflictsOverwritten,
+      };
+    });
   }
 }

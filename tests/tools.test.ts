@@ -5,10 +5,19 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
+import { FileCheckpointStore } from "../src/index.js";
 import { AsyncEventQueue } from "../src/engine/eventQueue.js";
 import { resolvePathWithinWorkspace } from "../src/tools/internal/pathGuard.js";
 import { getSafeBashEnvironment } from "../src/tools/internal/bashEnvironment.js";
@@ -237,6 +246,65 @@ describe("Built-in File & Shell Tools", () => {
     const readRes = await readTool.execute({ filePath: "app.ts" }, context);
     expect(readRes.content).toContain("const a = 10;");
     expect(readRes.content).toContain("const c = 10;");
+  });
+
+  it("integrates checkpoint lifecycle with WriteFileTool and EditFileTool allowing clean rollback", async () => {
+    const checkpointStore = new FileCheckpointStore({ homeDirectory: testWorkspace });
+    const writeTool = new WriteFileTool();
+    const editTool = new EditFileTool();
+
+    let lastCreatedEvent:
+      | { readonly checkpointId: string; readonly sequence: number; readonly label: string }
+      | undefined;
+
+    const context = {
+      threadId: "tool-checkpoint-thread",
+      toolCallId: "call-1",
+      workingDirectory: testWorkspace,
+      checkpointStore,
+      isCheckpointEnabled: true,
+      onCheckpointCreated: (evt: {
+        readonly checkpointId: string;
+        readonly sequence: number;
+        readonly label: string;
+      }) => {
+        lastCreatedEvent = evt;
+      },
+    };
+
+    // 1. Create a new file via WriteFileTool
+    await writeTool.execute({ filePath: "doc.txt", content: "initial content" }, context);
+    expect(lastCreatedEvent).toBeDefined();
+    expect(lastCreatedEvent?.label).toBe("writeFile: doc.txt");
+
+    // 2. Modify the file via EditFileTool
+    await editTool.execute(
+      { filePath: "doc.txt", oldString: "initial", newString: "mutated" },
+      context,
+    );
+    expect(lastCreatedEvent?.label).toBe("editFile: doc.txt");
+
+    // Checkpoints were recorded
+    const cps = await checkpointStore.listCheckpoints("tool-checkpoint-thread");
+    expect(cps.length).toBe(2);
+
+    // 3. Rollback the second checkpoint to restore file to "initial content"
+    const restoreResult = await checkpointStore.restoreCheckpoint(
+      "tool-checkpoint-thread",
+      cps[1]!.id,
+      testWorkspace,
+    );
+    expect(restoreResult.filesRestored).toBe(1);
+    expect(readFileSync(join(testWorkspace, "doc.txt"), "utf-8")).toBe("initial content");
+
+    // 4. Rollback the first checkpoint (where file was absent before) to delete it
+    const restoreFirst = await checkpointStore.restoreCheckpoint(
+      "tool-checkpoint-thread",
+      cps[0]!.id,
+      testWorkspace,
+    );
+    expect(restoreFirst.filesDeleted).toBe(1);
+    expect(existsSync(join(testWorkspace, "doc.txt"))).toBe(false);
   });
 
   it("executes BashTool capturing command output and exit codes", async () => {

@@ -4,9 +4,7 @@
  * @packageDocumentation
  */
 
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { AgentTool } from "./AgentTool.js";
@@ -66,13 +64,24 @@ export class WriteFileTool
       context.workingDirectory,
     );
     const fileExisted = existsSync(fullPath);
-    let beforeHash: string | undefined;
+    const relativeFilePath = path.relative(context.workingDirectory, fullPath);
 
-    // [NOTED: Phase 3 will migrate to snapshot before/after hash lifecycle]
-    if (context.isCheckpointEnabled && context.checkpointStore && fileExisted) {
+    let checkpointId: string | undefined;
+
+    // 1. Pre-mutation checkpoint capture
+    if (context.isCheckpointEnabled && context.checkpointStore) {
       try {
-        const existingContent = await readFile(fullPath);
-        beforeHash = await context.checkpointStore.storeBlob(existingContent);
+        const cpRecord = await context.checkpointStore.createCheckpoint(
+          context.threadId,
+          {
+            workingDirectory: context.workingDirectory,
+            turnIndex: context.turnIndex ?? 0,
+            label: `writeFile: ${parameters.filePath}`,
+            files: [relativeFilePath],
+            source: { toolName: WriteFileTool.toolName },
+          },
+        );
+        checkpointId = cpRecord.id;
       } catch (error) {
         throw new Error(
           `Failed to record pre-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
@@ -82,36 +91,22 @@ export class WriteFileTool
 
     const buffer = Buffer.from(parameters.content, "utf-8");
 
-    // Write file atomically using shared atomicWriteFile
+    // 2. Perform file write atomically
     await atomicWriteFile(fullPath, buffer);
 
-    // [NOTED: Phase 3 will migrate to snapshot before/after hash lifecycle]
-    if (context.isCheckpointEnabled && context.checkpointStore) {
+    // 3. Post-mutation checkpoint finalization
+    if (context.isCheckpointEnabled && context.checkpointStore && checkpointId) {
       try {
-        const afterHash = await context.checkpointStore.storeBlob(buffer);
-        const relativeFilePath = path.relative(context.workingDirectory, fullPath);
-        const checkpointId = `cp_${Date.now()}_${randomUUID().slice(0, 8)}`;
-        const record = await context.checkpointStore.createCheckpoint(context.threadId, {
-          id: checkpointId,
-          threadId: context.threadId,
-          turnIndex: 0,
-          toolName: WriteFileTool.toolName,
-          timestamp: Date.now(),
-          coverage: "partial",
-          files: [
-            {
-              relativePath: relativeFilePath,
-              ...(beforeHash ? { beforeHash } : {}),
-              afterHash,
-              status: fileExisted ? "~" : "+",
-            },
-          ],
-        });
-        context.onCheckpointCreated?.({
+        const updatedRecord = await context.checkpointStore.updateCheckpoint(
+          context.threadId,
           checkpointId,
-          sequence: record.sequence,
-          label: `WriteFile: ${parameters.filePath}`,
-          filesTouched: [parameters.filePath],
+          context.workingDirectory,
+        );
+        context.onCheckpointCreated?.({
+          checkpointId: updatedRecord.id,
+          sequence: updatedRecord.sequence,
+          label: updatedRecord.label,
+          filesTouched: [relativeFilePath],
         });
       } catch (error) {
         throw new Error(

@@ -1,13 +1,16 @@
 /**
- * @fileoverview Test suite for FileCheckpointStore, content-addressed blobs, and restore operations.
+ * @fileoverview Test suite for FileCheckpointStore, snapshot verification, and rollback integrity.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { FileCheckpointStore } from "../src/index.js";
+import {
+  FileCheckpointStore,
+  HernexCheckpointConflictError,
+  HernexStoreError,
+} from "../src/index.js";
 
 describe("FileCheckpointStore", () => {
   let testHome: string;
@@ -33,78 +36,101 @@ describe("FileCheckpointStore", () => {
     }
   });
 
-  it("stores and retrieves raw blobs using SHA-256 content addressing", async () => {
-    const data = Buffer.from("console.log('hello world');");
-    const hash = await store.storeBlob(data);
+  it("creates, retrieves, updates, lists, and deletes checkpoint records", async () => {
+    const threadId = "thread-checkpoint-test";
+    const filePath = "src/main.ts";
+    const absolutePath = path.join(workspaceDir, filePath);
+    mkdirSync(path.dirname(absolutePath), { recursive: true });
+    writeFileSync(absolutePath, "console.log('version 1');");
 
-    expect(hash).toBe(createHash("sha256").update(data).digest("hex"));
-
-    const retrieved = await store.readBlob(hash);
-    expect(retrieved).toEqual(data);
-  });
-
-  it("creates, retrieves, and lists checkpoint records", async () => {
-    const threadId = "th_checkpoint_test";
-
+    // 1. Create pre-mutation checkpoint
     const cp1 = await store.createCheckpoint(threadId, {
-      id: "cp_step_1",
-      threadId,
+      workingDirectory: workspaceDir,
       turnIndex: 1,
-      toolName: "writeFile",
-      timestamp: Date.now(),
-      coverage: "complete",
-      files: [
-        {
-          relativePath: "src/main.ts",
-          afterHash: "hash123",
-          status: "+",
-        },
-      ],
+      label: "Initial snapshot",
+      files: [filePath],
+      source: { toolName: "writeFile" },
     });
 
     expect(cp1.sequence).toBe(1);
-    expect(cp1.id).toBe("cp_step_1");
+    expect(cp1.id).toBeDefined();
+    expect(cp1.files.length).toBe(1);
+    expect(cp1.files[0]?.beforeHash).not.toBeNull();
+    expect(cp1.files[0]?.beforeHash).toBe(cp1.files[0]?.afterHash);
 
-    const fetched = await store.getCheckpoint(threadId, "cp_step_1");
+    // 2. Mutate file and update checkpoint
+    writeFileSync(absolutePath, "console.log('version 2');");
+    const updated = await store.updateCheckpoint(threadId, cp1.id, workspaceDir);
+    expect(updated.id).toBe(cp1.id);
+    expect(updated.files[0]?.afterHash).not.toBe(cp1.files[0]?.beforeHash);
+
+    // 3. Fetch checkpoint
+    const fetched = await store.getCheckpoint(threadId, cp1.id);
     expect(fetched).toBeDefined();
-    expect(fetched?.id).toBe("cp_step_1");
+    expect(fetched?.id).toBe(cp1.id);
+    expect(fetched?.files[0]?.afterHash).toBe(updated.files[0]?.afterHash);
 
+    // 4. List checkpoints
     const list = await store.listCheckpoints(threadId);
     expect(list.length).toBe(1);
-    expect(list[0]?.id).toBe("cp_step_1");
+    expect(list[0]?.id).toBe(cp1.id);
+
+    // 5. Delete checkpoint
+    const deleted = await store.deleteCheckpoint(threadId, cp1.id);
+    expect(deleted).toBe(true);
+    const afterDelete = await store.getCheckpoint(threadId, cp1.id);
+    expect(afterDelete).toBeUndefined();
+  });
+
+  it("handles absent-before semantics for newly created files", async () => {
+    const threadId = "thread-new-file";
+    const newFile = "generated.txt";
+    const absolutePath = path.join(workspaceDir, newFile);
+
+    // File does not exist yet
+    const cp = await store.createCheckpoint(threadId, {
+      workingDirectory: workspaceDir,
+      turnIndex: 1,
+      label: "Before create",
+      files: [newFile],
+    });
+
+    expect(cp.files[0]?.beforeHash).toBeNull();
+    expect(cp.files[0]?.afterHash).toBeNull();
+
+    // Now write the new file
+    writeFileSync(absolutePath, "hello newly generated content");
+    await store.updateCheckpoint(threadId, cp.id, workspaceDir);
+
+    // Plan restore: since beforeHash is null, restoring must plan to delete
+    const plan = await store.planRestore(threadId, cp.id, workspaceDir);
+    expect(plan.actions[0]?.action).toBe("delete");
+    expect(plan.hasConflicts).toBe(false);
+
+    // Execute restore: file should be deleted
+    const result = await store.restoreCheckpoint(threadId, cp.id, workspaceDir);
+    expect(result.filesDeleted).toBe(1);
+    expect(existsSync(absolutePath)).toBe(false);
   });
 
   it("plans and executes file restore with conflict detection", async () => {
-    const threadId = "th_restore_test";
+    const threadId = "thread-restore-test";
     const filePath = "config.json";
     const absolutePath = path.join(workspaceDir, filePath);
 
     // Initial file state
-    const originalContent = Buffer.from('{"version": 1}');
-    writeFileSync(absolutePath, originalContent);
-    const beforeHash = await store.storeBlob(originalContent);
-
-    // Mutation by tool
-    const toolContent = Buffer.from('{"version": 2, "mutated": true}');
-    writeFileSync(absolutePath, toolContent);
-    const afterHash = await store.storeBlob(toolContent);
+    writeFileSync(absolutePath, '{"version": 1}');
 
     const checkpoint = await store.createCheckpoint(threadId, {
-      id: "cp_modify_config",
-      threadId,
+      workingDirectory: workspaceDir,
       turnIndex: 1,
-      toolName: "editFile",
-      timestamp: Date.now(),
-      coverage: "complete",
-      files: [
-        {
-          relativePath: filePath,
-          beforeHash,
-          afterHash,
-          status: "~",
-        },
-      ],
+      label: "Config snapshot",
+      files: [filePath],
     });
+
+    // Mutate file
+    writeFileSync(absolutePath, '{"version": 2}');
+    await store.updateCheckpoint(threadId, checkpoint.id, workspaceDir);
 
     // Plan restore without external conflicts
     const plan = await store.planRestore(threadId, checkpoint.id, workspaceDir);
@@ -114,62 +140,131 @@ describe("FileCheckpointStore", () => {
 
     // Perform restore
     const result = await store.restoreCheckpoint(threadId, checkpoint.id, workspaceDir);
-    expect(result.success).toBe(true);
     expect(result.filesRestored).toBe(1);
+    expect(result.conflictsOverwritten).toBe(0);
     expect(readFileSync(absolutePath, "utf-8")).toBe('{"version": 1}');
   });
 
-  it("detects conflict when file was modified externally after tool step", async () => {
-    const threadId = "th_conflict_test";
+  it("detects external conflict and requires force: true to overwrite", async () => {
+    const threadId = "thread-conflict-test";
     const filePath = "server.ts";
     const absolutePath = path.join(workspaceDir, filePath);
 
-    const originalContent = Buffer.from("export const port = 3000;");
-    const beforeHash = await store.storeBlob(originalContent);
-
-    const toolContent = Buffer.from("export const port = 8080;");
-    const afterHash = await store.storeBlob(toolContent);
-
-    // Write tool content
-    writeFileSync(absolutePath, toolContent);
-
+    writeFileSync(absolutePath, "export const port = 3000;");
     const checkpoint = await store.createCheckpoint(threadId, {
-      id: "cp_change_port",
-      threadId,
+      workingDirectory: workspaceDir,
       turnIndex: 1,
-      toolName: "editFile",
-      timestamp: Date.now(),
-      coverage: "complete",
-      files: [
-        {
-          relativePath: filePath,
-          beforeHash,
-          afterHash,
-          status: "~",
-        },
-      ],
+      label: "Port snapshot",
+      files: [filePath],
     });
 
-    // Simulate external edit: user changed port to 9090
+    writeFileSync(absolutePath, "export const port = 8080;");
+    await store.updateCheckpoint(threadId, checkpoint.id, workspaceDir);
+
+    // Simulate third-party external edit
     writeFileSync(absolutePath, "export const port = 9090;");
 
     const plan = await store.planRestore(threadId, checkpoint.id, workspaceDir);
     expect(plan.hasConflicts).toBe(true);
     expect(plan.actions[0]?.isConflict).toBe(true);
 
-    // Attempting restore without force should throw
+    // Restore without force must throw HernexCheckpointConflictError
     await expect(
       store.restoreCheckpoint(threadId, checkpoint.id, workspaceDir),
-    ).rejects.toThrow("Restore conflicts detected");
+    ).rejects.toThrow(HernexCheckpointConflictError);
 
-    // Force restore overrides conflict
+    // Restore with force overwrites
     const forcedResult = await store.restoreCheckpoint(
       threadId,
       checkpoint.id,
       workspaceDir,
       { force: true },
     );
-    expect(forcedResult.success).toBe(true);
+    expect(forcedResult.conflictsOverwritten).toBe(1);
+    expect(forcedResult.filesRestored).toBe(1);
     expect(readFileSync(absolutePath, "utf-8")).toBe("export const port = 3000;");
+  });
+
+  it("rejects path traversal in manifest and input file paths", async () => {
+    const threadId = "thread-traversal-test";
+    await expect(
+      store.createCheckpoint(threadId, {
+        workingDirectory: workspaceDir,
+        turnIndex: 1,
+        label: "Traversal attempt",
+        files: ["../outside.txt"],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects invalid thread and checkpoint identifiers", async () => {
+    await expect(
+      store.createCheckpoint("../unsafe-thread", {
+        workingDirectory: workspaceDir,
+        turnIndex: 1,
+        label: "Unsafe",
+        files: ["test.txt"],
+      }),
+    ).rejects.toThrow("Invalid thread identifier");
+
+    await expect(
+      store.getCheckpoint("validThread", "-invalid-id"),
+    ).rejects.toThrow("Invalid checkpoint identifier");
+  });
+
+  it("fails closed when encountering a legacy unversioned manifest envelope", async () => {
+    const threadId = "thread-legacy";
+    const manifestPath = path.join(
+      testHome,
+      "threads",
+      threadId,
+      "checkpoints",
+      "manifest.json",
+    );
+    mkdirSync(path.dirname(manifestPath), { recursive: true });
+
+    // Write legacy array format lacking version 2 envelope
+    writeFileSync(
+      manifestPath,
+      JSON.stringify([{ id: "cp_old", sequence: 1 }]),
+    );
+
+    await expect(store.listCheckpoints(threadId)).rejects.toThrow(HernexStoreError);
+  });
+
+  it("preserves shared blobs when deleting one of multiple checkpoints", async () => {
+    const threadId = "thread-shared-blobs";
+    const file1 = "doc1.txt";
+    const file2 = "doc2.txt";
+    const content = "shared identical content";
+
+    writeFileSync(path.join(workspaceDir, file1), content);
+    writeFileSync(path.join(workspaceDir, file2), content);
+
+    const cp1 = await store.createCheckpoint(threadId, {
+      workingDirectory: workspaceDir,
+      turnIndex: 1,
+      label: "Doc 1",
+      files: [file1],
+    });
+
+    const cp2 = await store.createCheckpoint(threadId, {
+      workingDirectory: workspaceDir,
+      turnIndex: 1,
+      label: "Doc 2",
+      files: [file2],
+    });
+
+    // Mutate file2 and update checkpoint 2
+    writeFileSync(path.join(workspaceDir, file2), "mutated content");
+    await store.updateCheckpoint(threadId, cp2.id, workspaceDir);
+
+    // Delete cp1
+    await store.deleteCheckpoint(threadId, cp1.id);
+
+    // cp2 should still restore successfully using the shared blob
+    const restoreRes = await store.restoreCheckpoint(threadId, cp2.id, workspaceDir);
+    expect(restoreRes.filesRestored).toBe(1);
+    expect(readFileSync(path.join(workspaceDir, file2), "utf-8")).toBe(content);
   });
 });

@@ -3,6 +3,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { z } from 'zod';
 import type { ModelMessage } from '../src/index.js';
 import {
@@ -70,7 +73,7 @@ describe('AgentEngine Core Invariants', () => {
     ...overrides,
   });
 
-  it('initializes engine properties and manages conversational message state', () => {
+  it('initializes engine properties and manages conversational message state', async () => {
     const tools = new ToolRegistry({ includeDefaults: false });
     tools.register(new MockEchoTool());
 
@@ -95,12 +98,8 @@ describe('AgentEngine Core Invariants', () => {
     expect(freshEngine.currentTurn).toBe(0);
 
     // Append message
-    engine.addMessage({ role: 'user', content: 'New message' });
+    await engine.addMessage({ role: 'user', content: 'New message' });
     expect(engine.messages.length).toBe(3);
-
-    // Clear messages
-    engine.clearMessages();
-    expect(engine.messages.length).toBe(0);
   });
 
   it('supports all valid top-level reasoning levels defined in AI SDK v7', () => {
@@ -288,33 +287,48 @@ describe('AgentEngine Core Invariants', () => {
     expect(engine.messages.length).toBe(0);
   });
 
-  it('exposes direct convenience methods for checkpoints, metadata, and transcripts', async () => {
+  it('exposes direct store access through threadStore and checkpointStore properties', async () => {
     const threadId = `th_convenience_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const workspaceDir = path.join(tmpdir(), `engine_ws_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(workspaceDir, { recursive: true });
+
     const engine = new AgentEngine(
       createBaseConfig({
         threadId,
+        workingDirectory: workspaceDir,
         persist: true,
         checkpoint: true,
       }),
     );
 
-    // Checkpoints list returns empty array for new thread
-    const checkpoints = await engine.listCheckpoints();
+    expect(engine.threadStore).toBeDefined();
+    expect(engine.checkpointStore).toBeDefined();
+
+    // Checkpoints list directly via checkpointStore
+    const checkpoints = await engine.checkpointStore!.listCheckpoints(threadId);
     expect(checkpoints.length).toBe(0);
 
-    // Transcript returns empty array for new thread
-    const transcript = await engine.getTranscript();
+    // Transcript directly via threadStore
+    const transcript = await engine.threadStore!.getTranscript(threadId);
     expect(transcript.length).toBe(0);
 
-    // Manual checkpoint creation directly via engine
-    const createdCheckpoint = await engine.createCheckpoint({
+    // Create file in workspace to snapshot
+    const testFile = 'src/index.ts';
+    const absPath = path.join(workspaceDir, testFile);
+    mkdirSync(path.dirname(absPath), { recursive: true });
+    writeFileSync(absPath, 'console.log("hello");');
+
+    // Manual checkpoint creation directly via checkpointStore
+    const createdCheckpoint = await engine.checkpointStore!.createCheckpoint(threadId, {
+      workingDirectory: workspaceDir,
+      turnIndex: engine.currentTurn,
       label: 'Manual snapshot alpha',
-      files: ['src/index.ts'],
+      files: [testFile],
     });
     expect(createdCheckpoint.id).toBeDefined();
     expect(createdCheckpoint.files.length).toBe(1);
 
-    const updatedCheckpoints = await engine.listCheckpoints();
+    const updatedCheckpoints = await engine.checkpointStore!.listCheckpoints(threadId);
     expect(updatedCheckpoints.length).toBe(1);
     expect(updatedCheckpoints[0]?.id).toBe(createdCheckpoint.id);
   });

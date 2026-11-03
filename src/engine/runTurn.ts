@@ -566,6 +566,7 @@ export async function* runTurn(
           threadId: config.threadId,
           toolCallId: toolCall.callId,
           workingDirectory: config.workingDirectory,
+          turnIndex,
           abortSignal: effectiveSignal,
           checkpointStore: config.checkpointStore,
           isCheckpointEnabled,

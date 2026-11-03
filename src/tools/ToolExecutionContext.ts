@@ -28,6 +28,11 @@ export interface ToolExecutionContext {
   readonly workingDirectory: string;
 
   /**
+   * Optional zero-based turn index of the current agent turn.
+   */
+  readonly turnIndex?: number | undefined;
+
+  /**
    * Optional abort signal for immediate cancellation of in-flight operations.
    */
   readonly abortSignal?: AbortSignal | undefined;
