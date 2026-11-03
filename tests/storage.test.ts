@@ -16,6 +16,7 @@ import {
   encodeValue,
   decodeValue,
 } from "../src/storage/index.js";
+import { HernexLockError } from "../src/errors.js";
 
 describe("storage primitives", () => {
   let testDir: string;
@@ -205,6 +206,120 @@ describe("storage primitives", () => {
       const results = await Promise.all([locker1, locker2]);
       expect(results).toEqual([1, 2]);
       expect(order).toEqual([1, 2]);
+    });
+
+    it("immediately propagates non-EEXIST acquisition errors without retry", async () => {
+      const lockFile = path.join(testDir, "non_eexist.lock");
+      const nonEexistError = Object.assign(new Error("Permission denied"), {
+        code: "EACCES",
+      });
+      const openSpy = spyOn(fsPromises, "open").mockImplementation(async () => {
+        throw nonEexistError;
+      });
+
+      try {
+        await expect(
+          withFileLock(lockFile, async () => "value", { timeoutMs: 2000 }),
+        ).rejects.toThrow("Permission denied");
+      } finally {
+        openSpy.mockRestore();
+      }
+    });
+
+    it("times out with HernexLockError including lockPath when lock remains held", async () => {
+      const lockFile = path.join(testDir, "timeout.lock");
+      // Pre-create lock file to simulate an existing active holder
+      writeFileSync(
+        lockFile,
+        JSON.stringify({ pid: 1234, token: "other_token", createdAt: Date.now() }),
+      );
+
+      let caughtError: unknown = null;
+      try {
+        await withFileLock(lockFile, async () => "ok", {
+          timeoutMs: 60,
+          retryIntervalMs: 15,
+        });
+      } catch (error) {
+        caughtError = error;
+      }
+
+      expect(caughtError).toBeInstanceOf(HernexLockError);
+      const lockError = caughtError as HernexLockError;
+      expect(lockError.lockPath).toBe(path.resolve(lockFile));
+      expect(lockError.message).toContain("Failed to acquire lock");
+      expect(lockError.message).toContain("within 60ms");
+    });
+
+    it("detects token mismatch on release and preserves the foreign lock file", async () => {
+      const lockFile = path.join(testDir, "mismatch.lock");
+
+      let caughtError: unknown = null;
+      try {
+        await withFileLock(lockFile, async () => {
+          // Tamper with lock file while held
+          writeFileSync(
+            lockFile,
+            JSON.stringify({
+              pid: 99999,
+              token: "tampered_foreign_token",
+              createdAt: Date.now(),
+            }),
+          );
+          return "action_complete";
+        });
+      } catch (error) {
+        caughtError = error;
+      }
+
+      expect(caughtError).toBeInstanceOf(HernexLockError);
+      const lockError = caughtError as HernexLockError;
+      expect(lockError.message).toContain("Lock token mismatch");
+      expect(lockError.lockPath).toBe(path.resolve(lockFile));
+      // Foreign lock file must remain untouched
+      expect(existsSync(lockFile)).toBe(true);
+    });
+
+    it("propagates release failure when the operation succeeds", async () => {
+      const lockFile = path.join(testDir, "release_failure.lock");
+      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(async () => {
+        throw new Error("simulated lock unlink failure");
+      });
+
+      try {
+        await expect(
+          withFileLock(lockFile, async () => "op_done"),
+        ).rejects.toThrow("simulated lock unlink failure");
+      } finally {
+        unlinkSpy.mockRestore();
+      }
+    });
+
+    it("combines operation error and release failure into AggregateError", async () => {
+      const lockFile = path.join(testDir, "op_and_release_failure.lock");
+      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(async () => {
+        throw new Error("simulated lock release error");
+      });
+
+      try {
+        let caughtError: unknown = null;
+        try {
+          await withFileLock(lockFile, async () => {
+            throw new Error("simulated operation error");
+          });
+        } catch (error) {
+          caughtError = error;
+        }
+
+        expect(caughtError).toBeInstanceOf(AggregateError);
+        const agg = caughtError as AggregateError;
+        expect(agg.errors).toHaveLength(2);
+        expect((agg.errors[0] as Error).message).toBe("simulated operation error");
+        expect((agg.errors[1] as Error).message).toBe("simulated lock release error");
+        expect(agg.message).toContain("Operation failed and lock release also failed");
+      } finally {
+        unlinkSpy.mockRestore();
+      }
     });
   });
 

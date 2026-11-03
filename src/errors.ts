@@ -193,9 +193,21 @@ export class HernexStoreError extends Error {
  * Error thrown when a file lock cannot be acquired or operation fails.
  */
 export class HernexLockError extends Error {
-  constructor(message: string) {
+  /**
+   * Contested or failed lock file path.
+   */
+  readonly lockPath?: string | undefined;
+
+  /**
+   * Creates an instance of HernexLockError.
+   *
+   * @param message - Descriptive failure message.
+   * @param lockPath - Optional path to the contested or failed lock file.
+   */
+  constructor(message: string, lockPath?: string | undefined) {
     super(message);
     this.name = "HernexLockError";
+    this.lockPath = lockPath;
   }
 }
 
