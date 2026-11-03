@@ -324,7 +324,7 @@ describe("storage primitives", () => {
   });
 
   describe("jsonl append and read", () => {
-    it("appends and reads structured records", async () => {
+    it("appends and reads structured records using versioned envelope", async () => {
       const jsonlFile = path.join(testDir, "records.jsonl");
 
       await appendJsonl(jsonlFile, { id: 1, name: "alpha" });
@@ -337,7 +337,21 @@ describe("storage primitives", () => {
       ]);
     });
 
-    it("recovers from a torn trailing line without crashing", async () => {
+    it("reads legacy raw JSON lines without envelope fallback", async () => {
+      const jsonlFile = path.join(testDir, "legacy.jsonl");
+      writeFileSync(
+        jsonlFile,
+        '{"legacy": true, "name": "first"}\n{"legacy": false, "name": "second"}\n',
+      );
+
+      const records = await readJsonl<{ legacy: boolean; name: string }>(jsonlFile);
+      expect(records).toEqual([
+        { legacy: true, name: "first" },
+        { legacy: false, name: "second" },
+      ]);
+    });
+
+    it("recovers from a torn trailing line without crashing during read", async () => {
       const jsonlFile = path.join(testDir, "torn.jsonl");
 
       await appendJsonl(jsonlFile, { id: 100, status: "complete" });
@@ -347,19 +361,86 @@ describe("storage primitives", () => {
       const records = await readJsonl<{ id: number; status: string }>(jsonlFile);
       expect(records).toEqual([{ id: 100, status: "complete" }]);
     });
+
+    it("repairs torn non-newline-terminated final line before next append", async () => {
+      const jsonlFile = path.join(testDir, "torn_append.jsonl");
+
+      await appendJsonl(jsonlFile, { id: 1, title: "first" });
+      // Append torn incomplete line without trailing newline
+      writeFileSync(jsonlFile, readFileSync(jsonlFile, "utf-8") + '{"id": 2, "broken');
+
+      // Now append a new valid record; it should repair the torn tail first
+      await appendJsonl(jsonlFile, { id: 3, title: "third" });
+
+      const records = await readJsonl<{ id: number; title: string }>(jsonlFile);
+      expect(records).toEqual([
+        { id: 1, title: "first" },
+        { id: 3, title: "third" },
+      ]);
+    });
+
+    it("propagates truncate failure during torn line recovery fail-closed", async () => {
+      const jsonlFile = path.join(testDir, "truncate_fail.jsonl");
+      writeFileSync(jsonlFile, '{"id": 1}\n{"torn": "incomplete');
+
+      const truncateSpy = spyOn(fsPromises, "truncate").mockImplementation(async () => {
+        throw new Error("simulated truncate I/O error");
+      });
+
+      try {
+        await expect(readJsonl(jsonlFile)).rejects.toThrow(
+          "simulated truncate I/O error",
+        );
+        await expect(appendJsonl(jsonlFile, { id: 2 })).rejects.toThrow(
+          "simulated truncate I/O error",
+        );
+      } finally {
+        truncateSpy.mockRestore();
+      }
+    });
+
+    it("fails closed when middle record is corrupt", async () => {
+      const jsonlFile = path.join(testDir, "corrupt_middle.jsonl");
+      writeFileSync(
+        jsonlFile,
+        '{"id": 1}\n{"malformed json line\n{"id": 3}\n',
+      );
+
+      await expect(readJsonl(jsonlFile)).rejects.toThrow(
+        /Corrupt JSONL entry at line 2/,
+      );
+    });
+
+    it("fails closed when newline-terminated final record is corrupt", async () => {
+      const jsonlFile = path.join(testDir, "corrupt_terminated.jsonl");
+      writeFileSync(
+        jsonlFile,
+        '{"id": 1}\n{"corrupt": incomplete}\n',
+      );
+
+      await expect(readJsonl(jsonlFile)).rejects.toThrow(
+        /Corrupt JSONL entry at line 2/,
+      );
+    });
   });
 
   describe("valueCodec", () => {
-    it("round-trips primitive values and complex structures", () => {
+    it("round-trips primitive values and complex structures losslessly", () => {
       const data = {
         name: "Test",
         count: 42,
         active: true,
         nothing: null,
+        missing: undefined,
+        nanVal: NaN,
+        infVal: Infinity,
+        negInfVal: -Infinity,
+        negZeroVal: -0,
         url: new URL("https://example.com/api/test"),
-        buffer: Buffer.from("binary payload"),
+        bufferPayload: Buffer.from("binary buffer payload"),
+        uint8Payload: new Uint8Array([10, 20, 30, 40]),
         nested: {
-          items: [1, "two", false],
+          items: [1, "two", false, null, undefined],
         },
       };
 
@@ -370,9 +451,46 @@ describe("storage primitives", () => {
       expect(decoded.count).toBe(42);
       expect(decoded.active).toBe(true);
       expect(decoded.nothing).toBeNull();
+      expect(decoded.missing).toBeUndefined();
+      expect(Number.isNaN(decoded.nanVal)).toBe(true);
+      expect(decoded.infVal).toBe(Infinity);
+      expect(decoded.negInfVal).toBe(-Infinity);
+      expect(Object.is(decoded.negZeroVal, -0)).toBe(true);
+      expect(decoded.url).toBeInstanceOf(URL);
       expect(decoded.url.href).toBe("https://example.com/api/test");
-      expect(Buffer.from(decoded.buffer).toString("utf-8")).toBe("binary payload");
-      expect(decoded.nested.items).toEqual([1, "two", false]);
+
+      // Verify Buffer vs Uint8Array distinction
+      expect(Buffer.isBuffer(decoded.bufferPayload)).toBe(true);
+      expect(decoded.bufferPayload.toString("utf-8")).toBe("binary buffer payload");
+
+      expect(Buffer.isBuffer(decoded.uint8Payload)).toBe(false);
+      expect(decoded.uint8Payload).toBeInstanceOf(Uint8Array);
+      expect(Array.from(decoded.uint8Payload)).toEqual([10, 20, 30, 40]);
+
+      expect(decoded.nested.items).toEqual([1, "two", false, null, undefined]);
+    });
+
+    it("rejects circular references with TypeError", () => {
+      const cyclic: Record<string, unknown> = { id: 1 };
+      cyclic.self = cyclic;
+
+      expect(() => encodeValue(cyclic)).toThrow(TypeError);
+      expect(() => encodeValue(cyclic)).toThrow("circular reference detected");
+    });
+
+    it("rejects functions, symbols, and bigint with TypeError", () => {
+      expect(() => encodeValue(() => {})).toThrow("functions are not serializable");
+      expect(() => encodeValue(Symbol("unsupported"))).toThrow("symbols are not serializable");
+      expect(() => encodeValue(BigInt(12345))).toThrow("bigint is not supported");
+    });
+
+    it("rejects unsupported prototypes and custom class instances with TypeError", () => {
+      class CustomEntity {
+        constructor(readonly id: number) {}
+      }
+
+      expect(() => encodeValue(new CustomEntity(1))).toThrow(TypeError);
+      expect(() => encodeValue(new CustomEntity(1))).toThrow(/unsupported prototype/);
     });
   });
 });
