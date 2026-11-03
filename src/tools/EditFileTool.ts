@@ -6,12 +6,13 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
 import { resolvePathWithinWorkspace } from "./internal/pathGuard.js";
+import { atomicWriteFile } from "../storage/atomicFile.js";
 import { editFileDescription } from "./prompts.js";
 
 /**
@@ -103,13 +104,16 @@ export class EditFileTool
     }
 
     let beforeHash: string | undefined;
+    // [NOTED: Phase 3 will migrate to snapshot before/after hash lifecycle]
     if (context.isCheckpointEnabled && context.checkpointStore) {
       try {
         beforeHash = await context.checkpointStore.storeBlob(
           Buffer.from(rawContent, "utf-8"),
         );
-      } catch {
-        // Silently continue if pre-mutation blob storage fails
+      } catch (error) {
+        throw new Error(
+          `Failed to record pre-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
@@ -121,11 +125,10 @@ export class EditFileTool
 
     const buffer = Buffer.from(updatedContent, "utf-8");
 
-    // Atomic write pattern: write to temporary sibling file, then rename
-    const tempPath = `${fullPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-    await writeFile(tempPath, buffer);
-    await rename(tempPath, fullPath);
+    // Write file atomically using shared atomicWriteFile
+    await atomicWriteFile(fullPath, buffer);
 
+    // [NOTED: Phase 3 will migrate to snapshot before/after hash lifecycle]
     if (context.isCheckpointEnabled && context.checkpointStore) {
       try {
         const afterHash = await context.checkpointStore.storeBlob(buffer);
@@ -153,8 +156,10 @@ export class EditFileTool
           label: `EditFile: ${parameters.filePath}`,
           filesTouched: [parameters.filePath],
         });
-      } catch {
-        // Silently continue if checkpoint recording fails
+      } catch (error) {
+        throw new Error(
+          `Failed to record post-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 

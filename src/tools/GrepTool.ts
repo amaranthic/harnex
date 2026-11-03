@@ -6,8 +6,8 @@
  */
 
 import { existsSync } from "node:fs";
-import { glob, readFile, stat } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { glob, lstat, readFile } from "node:fs/promises";
+import { relative } from "node:path";
 import { z } from "zod";
 import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
@@ -142,7 +142,10 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
       throw new Error(`Target path not found: ${parameters.path ?? targetPath}`);
     }
 
-    const targetStats = await stat(targetPath);
+    const targetStats = await lstat(targetPath);
+    if (targetStats.isSymbolicLink()) {
+      throw new Error(`Target path is a symbolic link: ${parameters.path ?? targetPath}`);
+    }
     const flags = parameters.caseInsensitive ? "i" : "";
     let regex: RegExp;
     try {
@@ -185,9 +188,38 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
           continue;
         }
 
-        const fullFilePath = resolve(targetPath, entry);
-        const fileStat = await stat(fullFilePath).catch(() => null);
-        if (!fileStat || !fileStat.isFile()) {
+        let fullFilePath: string;
+        try {
+          fullFilePath = resolvePathWithinWorkspace(entry, targetPath);
+        } catch (error: unknown) {
+          if (
+            error instanceof Error &&
+            (error.message.includes("symbolic link") ||
+              error.message.includes("resolves outside"))
+          ) {
+            // Deliberately skip symlinks and outside paths during file enumeration
+            continue;
+          }
+          throw error;
+        }
+
+        let fileStat;
+        try {
+          fileStat = await lstat(fullFilePath);
+        } catch (error: unknown) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            (error as { code: string }).code === "ENOENT"
+          ) {
+            // File vanished between glob enumeration and lstat
+            continue;
+          }
+          throw error;
+        }
+
+        if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
           continue;
         }
 
@@ -242,17 +274,43 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
       }
     }
 
+    let fileStat;
+    try {
+      fileStat = await lstat(fullFilePath);
+    } catch (error: unknown) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code: string }).code === "ENOENT"
+      ) {
+        return false;
+      }
+      throw error;
+    }
+
+    if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+      return false;
+    }
+
     // Skip excessively large files (>10MB) to protect memory
-    const fileStat = await stat(fullFilePath).catch(() => null);
-    if (!fileStat || fileStat.size > 10 * 1024 * 1024) {
+    if (fileStat.size > 10 * 1024 * 1024) {
       return false;
     }
 
     let buffer: Buffer;
     try {
       buffer = await readFile(fullFilePath);
-    } catch {
-      return false;
+    } catch (error: unknown) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code: string }).code === "ENOENT"
+      ) {
+        return false;
+      }
+      throw error;
     }
 
     // Skip binary files containing null bytes

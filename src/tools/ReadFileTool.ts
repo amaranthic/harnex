@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { z } from "zod";
 import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
@@ -140,10 +140,10 @@ export class ReadFileTool
       throw new Error(`File not found: ${parameters.filePath}`);
     }
 
-    const fileStats = await stat(fullPath);
-    if (!fileStats.isFile()) {
+    const fileStats = await lstat(fullPath);
+    if (fileStats.isSymbolicLink() || !fileStats.isFile()) {
       throw new Error(
-        `Path '${parameters.filePath}' is not a regular file. Directory, device, socket, or non-regular paths cannot be read as text.`,
+        `Path '${parameters.filePath}' is not a regular file. Directory, symlink, device, socket, or non-regular paths cannot be read as text.`,
       );
     }
 

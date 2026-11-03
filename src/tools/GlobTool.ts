@@ -6,8 +6,8 @@
  */
 
 import { existsSync } from "node:fs";
-import { glob } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { glob, lstat } from "node:fs/promises";
+import { relative } from "node:path";
 import { z } from "zod";
 import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
@@ -92,6 +92,11 @@ export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
       throw new Error(`Search directory not found: ${parameters.path ?? searchDir}`);
     }
 
+    const rootStats = await lstat(searchDir);
+    if (!rootStats.isDirectory()) {
+      throw new Error(`Search path is not a directory: ${parameters.path ?? searchDir}`);
+    }
+
     const matchedFiles: string[] = [];
     let isTruncated = false;
 
@@ -118,13 +123,30 @@ export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
         continue;
       }
 
+      let fullPath: string;
+      try {
+        fullPath = resolvePathWithinWorkspace(entry, searchDir);
+        const entryStats = await lstat(fullPath);
+        if (entryStats.isSymbolicLink()) {
+          continue;
+        }
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          (error.message.includes("symbolic link") ||
+            error.message.includes("resolves outside"))
+        ) {
+          continue;
+        }
+        throw error;
+      }
+
       if (matchedFiles.length >= maxGlobResults) {
         isTruncated = true;
         break;
       }
 
       // Convert to relative path from workspace root for clean representation
-      const fullPath = resolve(searchDir, entry);
       const relativePath = relative(context.workingDirectory, fullPath).replace(
         /\\/g,
         "/",

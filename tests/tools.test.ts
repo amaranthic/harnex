@@ -412,6 +412,73 @@ describe("Built-in File & Shell Tools", () => {
     ).toThrow("contains symbolic link");
   });
 
+  it("verifies read, write, edit, glob, and grep cannot traverse workspace symlinks pointing outside", async () => {
+    const outsideDir = join(tmpdir(), `harnex_outside_tools_${Date.now()}`);
+    mkdirSync(outsideDir, { recursive: true });
+    const outsideFile = join(outsideDir, "outside_secret.txt");
+    writeFileSync(outsideFile, "SECRET_PASS=top_secret_token\n", "utf8");
+
+    const symlinkFile = join(testWorkspace, "symlink_secret.txt");
+    symlinkSync(outsideFile, symlinkFile);
+
+    const symlinkDir = join(testWorkspace, "symlink_outside_dir");
+    symlinkSync(outsideDir, symlinkDir, "dir");
+
+    const readTool = new ReadFileTool();
+    const writeTool = new WriteFileTool();
+    const editTool = new EditFileTool();
+    const globTool = new GlobTool();
+    const grepTool = new GrepTool();
+
+    const context = {
+      threadId: "symlink-guard-thread",
+      toolCallId: "call_symlink",
+      workingDirectory: testWorkspace,
+    };
+
+    try {
+      // 1. ReadFileTool rejects reading through symlink
+      await expect(
+        readTool.execute({ filePath: "symlink_secret.txt" }, context),
+      ).rejects.toThrow("contains symbolic link");
+
+      // 2. WriteFileTool rejects writing through symlink
+      await expect(
+        writeTool.execute(
+          { filePath: "symlink_secret.txt", content: "overwritten" },
+          context,
+        ),
+      ).rejects.toThrow("contains symbolic link");
+
+      // 3. EditFileTool rejects editing through symlink
+      await expect(
+        editTool.execute(
+          {
+            filePath: "symlink_secret.txt",
+            oldString: "SECRET_PASS",
+            newString: "PUBLIC_PASS",
+          },
+          context,
+        ),
+      ).rejects.toThrow("contains symbolic link");
+
+      // 4. GlobTool excludes symlink file and symlink directory matches
+      const globResult = await globTool.execute({ pattern: "*" }, context);
+      expect(globResult.matches).not.toContain("symlink_secret.txt");
+      expect(globResult.matches).not.toContain("symlink_outside_dir");
+
+      // 5. GrepTool does not enumerate or return matches from symlinks
+      const grepResult = await grepTool.execute(
+        { pattern: "top_secret_token" },
+        context,
+      );
+      expect(grepResult.totalMatches).toBe(0);
+      expect(grepResult.matches.length).toBe(0);
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
   it("constructs sanitized bash environment with allowlist support", () => {
     const prevKey = process.env.TEST_API_KEY;
     const prevCustom = process.env.CUSTOM_ALLOWED_VAR;
