@@ -21,21 +21,20 @@ export interface StepTokenUsage {
  * Reason explaining why a turn reached completion.
  */
 export type TurnFinishReason =
-  | 'completed'
-  | 'maxSteps'
-  | 'maxTurns'
-  | 'interrupted'
-  | 'error'
-  | 'vetoed'
-  | 'lengthExceeded'
-  | 'contentFilter';
+  | "completed"
+  | "maxSteps"
+  | "interrupted"
+  | "error"
+  | "vetoed"
+  | "lengthExceeded"
+  | "contentFilter";
 
 /**
  * Event emitted when a new turn is initiated by a user message or prompt.
  */
 export interface TurnStartedEvent {
   /** Discriminant event type. */
-  readonly type: 'turnStarted';
+  readonly type: "turnStarted";
   /** One-based index of the active turn within the thread session. */
   readonly turnIndex: number;
   /** The user prompt that initiated the turn. */
@@ -47,7 +46,7 @@ export interface TurnStartedEvent {
  */
 export interface StepStartedEvent {
   /** Discriminant event type. */
-  readonly type: 'stepStarted';
+  readonly type: "stepStarted";
   /** One-based index of the step within the turn loop. */
   readonly stepIndex: number;
   /** Millisecond epoch timestamp when the step started. */
@@ -59,7 +58,7 @@ export interface StepStartedEvent {
  */
 export interface StepFinishedEvent {
   /** Discriminant event type. */
-  readonly type: 'stepFinished';
+  readonly type: "stepFinished";
   /** One-based index of the step within the turn loop. */
   readonly stepIndex: number;
   /** Token usage statistics for this specific step. */
@@ -71,7 +70,7 @@ export interface StepFinishedEvent {
  */
 export interface TurnFinishedEvent {
   /** Discriminant event type. */
-  readonly type: 'turnFinished';
+  readonly type: "turnFinished";
   /** One-based index of the completed turn. */
   readonly turnIndex: number;
   /** Reason why the turn concluded. */

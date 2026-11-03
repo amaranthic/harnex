@@ -5,7 +5,6 @@
 
 export * from "./AgentTool.js";
 export * from "./ToolExecutionContext.js";
-export * from "./ToolExecutionQueue.js";
 export * from "./ToolRegistry.js";
 export * from "./prompts.js";
 export * from "./ReadFileTool.js";
@@ -16,4 +15,3 @@ export * from "./TaskManagerTool.js";
 export * from "./tasks/index.js";
 export * from "./GlobTool.js";
 export * from "./GrepTool.js";
-export * from "./internal/pathGuard.js";

@@ -1,7 +1,12 @@
+/**
+ * @fileoverview Custom error classes for Hernex runtime, model routing, and storage.
+ * @packageDocumentation
+ */
+
 import { AISDKError } from "ai";
 
-const invalidModelStringErrorName = "Greg_InvalidModelStringError";
-const invalidModelStringMarker = `greg.error.${invalidModelStringErrorName}`;
+const invalidModelStringErrorName = "HernexInvalidModelStringError";
+const invalidModelStringMarker = `hernex.error.${invalidModelStringErrorName}`;
 const invalidModelStringSymbol = Symbol.for(invalidModelStringMarker);
 
 /**
@@ -10,7 +15,7 @@ const invalidModelStringSymbol = Symbol.for(invalidModelStringMarker);
  * Expected format is `provider/modelId` where `provider` is non-empty and
  * `modelId` is non-empty (e.g. `openai/gpt-4o` or `openrouter/openrouter/free`).
  */
-export class InvalidModelStringError extends AISDKError {
+export class HernexInvalidModelStringError extends AISDKError {
   /**
    * Internal brand symbol confirming instance identity across package boundaries.
    */
@@ -22,7 +27,7 @@ export class InvalidModelStringError extends AISDKError {
   readonly modelString: string;
 
   /**
-   * Creates an instance of InvalidModelStringError.
+   * Creates an instance of HernexInvalidModelStringError.
    *
    * @param params - Configuration parameters for the error.
    * @param params.modelString - The raw invalid model string provided by the caller.
@@ -44,26 +49,26 @@ export class InvalidModelStringError extends AISDKError {
   }
 
   /**
-   * Type guard to check whether an unknown error is an instance of InvalidModelStringError.
+   * Type guard to check whether an unknown error is an instance of HernexInvalidModelStringError.
    *
    * @param error - The value to check.
-   * @returns True if the error is an InvalidModelStringError, false otherwise.
+   * @returns True if the error is an HernexInvalidModelStringError, false otherwise.
    */
   static override isInstance(
     error: unknown,
-  ): error is InvalidModelStringError {
+  ): error is HernexInvalidModelStringError {
     return AISDKError.hasMarker(error, invalidModelStringMarker);
   }
 }
 
-const missingCredentialsErrorName = "Greg_MissingCredentialsError";
-const missingCredentialsMarker = `greg.error.${missingCredentialsErrorName}`;
+const missingCredentialsErrorName = "HernexMissingCredentialsError";
+const missingCredentialsMarker = `hernex.error.${missingCredentialsErrorName}`;
 const missingCredentialsSymbol = Symbol.for(missingCredentialsMarker);
 
 /**
- * Error thrown when mandatory credentials (`apiKey` or `baseUrl`) are missing from a Greg request.
+ * Error thrown when mandatory credentials (`apiKey` or `baseUrl`) are missing from a Hernex request.
  */
-export class MissingCredentialsError extends AISDKError {
+export class HernexMissingCredentialsError extends AISDKError {
   /**
    * Internal brand symbol confirming instance identity across package boundaries.
    */
@@ -80,7 +85,7 @@ export class MissingCredentialsError extends AISDKError {
   readonly provider: string;
 
   /**
-   * Creates an instance of MissingCredentialsError.
+   * Creates an instance of HernexMissingCredentialsError.
    *
    * @param params - Configuration parameters for the error.
    * @param params.missingField - The specific field that was omitted or empty.
@@ -95,7 +100,7 @@ export class MissingCredentialsError extends AISDKError {
   }) {
     super({
       name: missingCredentialsErrorName,
-      message: `Missing required credential "${missingField}" for provider "${provider}". Every Greg request must supply both non-empty "apiKey" and "baseUrl".`,
+      message: `Missing required credential "${missingField}" for provider "${provider}". Every Hernex request must supply both non-empty "apiKey" and "baseUrl".`,
     });
 
     this.missingField = missingField;
@@ -103,26 +108,26 @@ export class MissingCredentialsError extends AISDKError {
   }
 
   /**
-   * Type guard to check whether an unknown error is an instance of MissingCredentialsError.
+   * Type guard to check whether an unknown error is an instance of HernexMissingCredentialsError.
    *
    * @param error - The value to check.
-   * @returns True if the error is an MissingCredentialsError, false otherwise.
+   * @returns True if the error is an HernexMissingCredentialsError, false otherwise.
    */
   static override isInstance(
     error: unknown,
-  ): error is MissingCredentialsError {
+  ): error is HernexMissingCredentialsError {
     return AISDKError.hasMarker(error, missingCredentialsMarker);
   }
 }
 
-const unsupportedProviderErrorName = "Greg_UnsupportedProviderError";
-const unsupportedProviderMarker = `greg.error.${unsupportedProviderErrorName}`;
+const unsupportedProviderErrorName = "HernexUnsupportedProviderError";
+const unsupportedProviderMarker = `hernex.error.${unsupportedProviderErrorName}`;
 const unsupportedProviderSymbol = Symbol.for(unsupportedProviderMarker);
 
 /**
- * Error thrown when a requested provider is not supported by the runtime.
+ * Error thrown when a requested provider is not supported by the runtime or registry.
  */
-export class UnsupportedProviderError extends AISDKError {
+export class HernexUnsupportedProviderError extends AISDKError {
   /**
    * Internal brand symbol confirming instance identity across package boundaries.
    */
@@ -134,12 +139,12 @@ export class UnsupportedProviderError extends AISDKError {
   readonly provider: string;
 
   /**
-   * List of provider identifiers currently supported by the runtime.
+   * List of provider identifiers currently supported.
    */
   readonly supportedProviders: readonly string[];
 
   /**
-   * Creates an instance of UnsupportedProviderError.
+   * Creates an instance of HernexUnsupportedProviderError.
    *
    * @param params - Configuration parameters for the error.
    * @param params.provider - The unsupported provider name.
@@ -162,22 +167,21 @@ export class UnsupportedProviderError extends AISDKError {
   }
 
   /**
-   * Type guard to check whether an unknown error is an instance of UnsupportedProviderError.
+   * Type guard to check whether an unknown error is an instance of HernexUnsupportedProviderError.
    *
    * @param error - The value to check.
-   * @returns True if the error is an UnsupportedProviderError, false otherwise.
+   * @returns True if the error is an HernexUnsupportedProviderError, false otherwise.
    */
   static override isInstance(
     error: unknown,
-  ): error is UnsupportedProviderError {
+  ): error is HernexUnsupportedProviderError {
     return AISDKError.hasMarker(error, unsupportedProviderMarker);
   }
 }
 
-export { InvalidModelStringError as HernexInvalidModelStringError };
-export { MissingCredentialsError as HernexMissingCredentialsError };
-export { UnsupportedProviderError as HernexUnsupportedProviderError };
-
+/**
+ * Error thrown when a storage operation fails.
+ */
 export class HernexStoreError extends Error {
   constructor(message: string) {
     super(message);
@@ -185,6 +189,9 @@ export class HernexStoreError extends Error {
   }
 }
 
+/**
+ * Error thrown when a file lock cannot be acquired or operation fails.
+ */
 export class HernexLockError extends Error {
   constructor(message: string) {
     super(message);
@@ -192,6 +199,9 @@ export class HernexLockError extends Error {
   }
 }
 
+/**
+ * Error thrown when a checkpoint restore encounters an external conflict.
+ */
 export class HernexCheckpointConflictError extends Error {
   constructor(message: string) {
     super(message);

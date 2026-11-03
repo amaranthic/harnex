@@ -3,27 +3,66 @@
  * @packageDocumentation
  */
 
-import { randomUUID } from 'node:crypto';
-import { streamText, type HernexStreamTextOptions as GregStreamTextOptions } from '../runtime.js';
-import type { ModelMessage } from '../model/types.js';
-import type { AgentEvent } from '../events/index.js';
-import type { StepTokenUsage, TurnFinishReason } from '../events/stepEvents.js';
-import type { CheckpointCreatedEvent } from '../events/checkpointEvents.js';
-import type { AgentEngineConfig, RunTurnOptions } from './engineConfig.js';
-import type { ToolExecutionContext } from '../tools/ToolExecutionContext.js';
-import { AsyncEventQueue } from './eventQueue.js';
+import { randomUUID } from "node:crypto";
+import { streamText, type HernexStreamTextOptions } from "../runtime.js";
+import type { ModelMessage } from "../model/types.js";
+import type { AgentEvent, JsonValue, ErrorInfo } from "../events/index.js";
+import type { StepTokenUsage, TurnFinishReason } from "../events/stepEvents.js";
+import type { CheckpointCreatedEvent } from "../events/checkpointEvents.js";
+import type { AgentEngineConfig, RunTurnOptions } from "./engineConfig.js";
+import type { ToolExecutionContext } from "../tools/ToolExecutionContext.js";
+import { AsyncEventQueue } from "./eventQueue.js";
 
 /**
  * Extracts normalized provider identifier from a model string if formatted as "provider/model_id".
  */
 function getModelProvider(model: string | unknown): string | undefined {
-  if (typeof model === 'string') {
-    const slashIndex = model.indexOf('/');
+  if (typeof model === "string") {
+    const slashIndex = model.indexOf("/");
     if (slashIndex > 0) {
       return model.slice(0, slashIndex).trim().toLowerCase();
     }
   }
   return undefined;
+}
+
+/**
+ * Converts any unknown error into a normalized serializable ErrorInfo object.
+ */
+function toErrorInfo(error: unknown): ErrorInfo {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack ? { stack: error.stack } : {}),
+      ...(typeof (error as unknown as { code?: unknown }).code === "string"
+        ? { code: (error as unknown as { code: string }).code }
+        : {}),
+    };
+  }
+  return {
+    name: "Error",
+    message: String(error),
+  };
+}
+
+/**
+ * Converts any arbitrary value into pure serializable JSON-compatible data.
+ */
+function toJsonValue(value: unknown): JsonValue {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as JsonValue;
+  } catch {
+    return String(value);
+  }
 }
 
 /**
@@ -35,7 +74,7 @@ function combineAbortSignals(
   const activeSignals = signals.filter((s): s is AbortSignal => Boolean(s));
   if (activeSignals.length === 0) return undefined;
   if (activeSignals.length === 1) return activeSignals[0];
-  if (typeof AbortSignal.any === 'function') {
+  if (typeof AbortSignal.any === "function") {
     return AbortSignal.any(activeSignals);
   }
   const controller = new AbortController();
@@ -44,7 +83,7 @@ function combineAbortSignals(
       controller.abort(signal.reason);
       return controller.signal;
     }
-    signal.addEventListener('abort', () => controller.abort(signal.reason), {
+    signal.addEventListener("abort", () => controller.abort(signal.reason), {
       once: true,
     });
   }
@@ -77,11 +116,8 @@ export async function* runTurn(
 
   // Persistence and Checkpoint invariants: if persist is false, checkpoint is strictly false
   const isPersist = Boolean(config.persist ?? Boolean(config.threadStore));
-  const isCheckpointEnabled = isPersist && Boolean(
-    typeof config.checkpoint === 'boolean'
-      ? config.checkpoint
-      : config.checkpoint?.enabled ?? Boolean(config.checkpointStore),
-  );
+  const isCheckpointEnabled =
+    isPersist && Boolean(config.checkpoint ?? Boolean(config.checkpointStore));
 
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
@@ -105,61 +141,86 @@ export async function* runTurn(
     return usage;
   };
 
-  let finishReason: TurnFinishReason = 'completed';
+  let finishReason: TurnFinishReason = "completed";
   const initialHistoryLength = conversationMessages.length;
 
   try {
-    // Credential invariant check: ensure per-turn model cannot silently reuse another provider's credentials
-    const configProvider = getModelProvider(config.model);
-    const overrideProvider = getModelProvider(options.model);
+    // Partial credential override check
+    const hasPartialApiKey = options.apiKey !== undefined;
+    const hasPartialBaseUrl = options.baseUrl !== undefined;
     if (
-      overrideProvider &&
-      configProvider &&
-      overrideProvider !== configProvider &&
-      (!options.apiKey || !options.baseUrl)
+      (hasPartialApiKey && !hasPartialBaseUrl) ||
+      (!hasPartialApiKey && hasPartialBaseUrl)
     ) {
       throw new Error(
-        `Per-turn model override changed provider from "${configProvider}" to "${overrideProvider}", but explicit per-turn credentials (apiKey and baseUrl) were not supplied. Falling back across different providers is forbidden.`,
+        "Per-turn credential override is incomplete: both apiKey and baseUrl must be provided together.",
       );
+    }
+
+    // Credential invariant check: ensure per-turn model cannot silently reuse another provider's credentials
+    if (options.model !== undefined) {
+      const isConfigString = typeof config.model === "string";
+      const isOverrideString = typeof options.model === "string";
+
+      if (!isConfigString || !isOverrideString) {
+        if (!options.apiKey || !options.baseUrl) {
+          throw new Error(
+            "Per-turn model override with LanguageModel instance requires explicit per-turn credentials (both apiKey and baseUrl).",
+          );
+        }
+      } else {
+        const configProvider = getModelProvider(config.model);
+        const overrideProvider = getModelProvider(options.model);
+        if (
+          overrideProvider &&
+          configProvider &&
+          overrideProvider !== configProvider &&
+          (!options.apiKey || !options.baseUrl)
+        ) {
+          throw new Error(
+            `Per-turn model override changed provider from "${configProvider}" to "${overrideProvider}", but explicit per-turn credentials (apiKey and baseUrl) were not supplied. Falling back across different providers is forbidden.`,
+          );
+        }
+      }
     }
 
     // 1. Emit 'turnStarted'
     yield {
-      type: 'turnStarted',
+      type: "turnStarted",
       turnIndex,
       userMessage: userPrompt,
     };
 
     if (config.threadStore) {
       await config.threadStore.appendTranscript(config.threadId, {
-        type: 'turnStarted',
+        type: "turnStarted",
         turnIndex,
         userPrompt,
         timestamp: Date.now(),
       });
     }
 
-    // 2. Call hooks.onPreTurn() -> await product decision
+    // 2. Call hooks.onBeforeTurn() -> await product decision
     let effectiveUserPrompt = userPrompt;
-    let injectedInstructions = '';
-    if (config.hooks?.onPreTurn) {
-      const preTurnResult = await config.hooks.onPreTurn({
+    let injectedInstructions = "";
+    if (config.hooks?.onBeforeTurn) {
+      const beforeTurnResult = await config.hooks.onBeforeTurn({
         turnIndex,
         userPrompt,
       });
 
-      if (preTurnResult) {
-        if (preTurnResult.veto) {
-          finishReason = 'vetoed';
+      if (beforeTurnResult) {
+        if (beforeTurnResult.veto) {
+          finishReason = "vetoed";
           yield {
-            type: 'turnFinished',
+            type: "turnFinished",
             turnIndex,
             finishReason,
             totalUsage: buildTotalUsage(),
           };
           if (config.threadStore) {
             await config.threadStore.appendTranscript(config.threadId, {
-              type: 'turnFinished',
+              type: "turnFinished",
               turnIndex,
               finishReason,
               timestamp: Date.now(),
@@ -167,66 +228,44 @@ export async function* runTurn(
           }
           return;
         }
-        if (preTurnResult.userPrompt) {
-          effectiveUserPrompt = preTurnResult.userPrompt;
+        if (beforeTurnResult.userPrompt) {
+          effectiveUserPrompt = beforeTurnResult.userPrompt;
         }
-        if (preTurnResult.injectedInstructions) {
-          injectedInstructions = preTurnResult.injectedInstructions;
+        if (beforeTurnResult.injectedInstructions) {
+          injectedInstructions = beforeTurnResult.injectedInstructions;
         }
       }
     }
 
-    // 3. Append user message to conversation history
+    // Append user message to conversation history
     const userMessage: ModelMessage = {
-      role: 'user',
+      role: "user",
       content: effectiveUserPrompt,
     };
     conversationMessages.push(userMessage);
 
     if (config.threadStore) {
       await config.threadStore.appendTranscript(config.threadId, {
-        type: 'modelMessage',
+        type: "modelMessage",
         message: userMessage,
         timestamp: Date.now(),
       });
     }
 
-    // Combine instructions cleanly
-    const instructionsList = [
-      config.instructions,
-      options.instructions,
-      injectedInstructions,
-    ].filter((inst): inst is string => Boolean(inst && inst.trim().length > 0));
+    // Combined instructions for this turn
+    const combinedInstructions = [config.instructions, injectedInstructions]
+      .filter((s): s is string => Boolean(s && s.trim().length > 0))
+      .join("\n\n");
 
-    const combinedInstructions =
-      instructionsList.length > 0 ? instructionsList.join('\n\n') : undefined;
-
-    // 4. Autonomous step loop
-    let stepIndex = 1;
-
-    while (stepIndex <= maxSteps) {
+    // 3. Step Loop (1 to maxSteps)
+    for (let stepIndex = 1; stepIndex <= maxSteps; stepIndex++) {
       if (effectiveSignal?.aborted) {
-        finishReason = 'interrupted';
-        yield {
-          type: 'turnFinished',
-          turnIndex,
-          finishReason,
-          totalUsage: buildTotalUsage(),
-        };
-        if (config.threadStore) {
-          await config.threadStore.appendTranscript(config.threadId, {
-            type: 'turnFinished',
-            turnIndex,
-            finishReason,
-            timestamp: Date.now(),
-          });
-        }
-        return;
+        finishReason = "interrupted";
+        break;
       }
 
-      // Emit stepStarted
       yield {
-        type: 'stepStarted',
+        type: "stepStarted",
         stepIndex,
         timestamp: Date.now(),
       };
@@ -234,10 +273,11 @@ export async function* runTurn(
       const sdkToolDefinitions = config.tools.toSdkToolDefinitions();
       const hasTools = Object.keys(sdkToolDefinitions).length > 0;
 
-      const streamOptions: GregStreamTextOptions = {
+      const streamOptions: HernexStreamTextOptions = {
         model: options.model ?? config.model,
         apiKey: options.apiKey ?? config.apiKey,
         baseUrl: options.baseUrl ?? config.baseUrl,
+        ...(config.providerRegistry ? { providerRegistry: config.providerRegistry } : {}),
         messages: conversationMessages,
         ...(combinedInstructions ? { instructions: combinedInstructions } : {}),
         ...(hasTools ? { tools: sdkToolDefinitions } : {}),
@@ -253,78 +293,48 @@ export async function* runTurn(
 
       let responseMessages: ModelMessage[] = [];
       let rawUsage: any = {};
-      const maxRetries = 3;
 
-      // Resilient execution with retryScheduled events for transient rate limits and network drops
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        const proposedToolCallsInAttempt: typeof proposedToolCalls = [];
-        try {
-          const streamResult = streamText(streamOptions);
+      const streamResult = streamText(streamOptions);
 
-          for await (const chunk of streamResult.stream) {
-            if (chunk.type === 'text-delta') {
-              yield {
-                type: 'tokenDelta',
-                text: (chunk as any).text ?? (chunk as any).textDelta ?? '',
-                messageId: (chunk as any).id,
-              };
-            } else if (chunk.type === 'reasoning-delta') {
-              yield {
-                type: 'thoughtDelta',
-                text: (chunk as any).text ?? (chunk as any).textDelta ?? '',
-                messageId: (chunk as any).id,
-              };
-            } else if (chunk.type === 'tool-call') {
-              const rawCall = chunk as any;
-              const toolCall = {
-                callId: rawCall.toolCallId ?? rawCall.id ?? randomUUID(),
-                toolName: rawCall.toolName,
-                parameters: rawCall.input ?? rawCall.args ?? {},
-              };
-              proposedToolCallsInAttempt.push(toolCall);
-              yield {
-                type: 'toolCallProposed',
-                callId: toolCall.callId,
-                toolName: toolCall.toolName,
-                parameters: toolCall.parameters,
-              };
-            }
-          }
-
-          responseMessages = await streamResult.responseMessages;
-          rawUsage = await streamResult.usage;
-          proposedToolCalls.push(...proposedToolCallsInAttempt);
-          break;
-        } catch (streamError) {
-          const errorInstance =
-            streamError instanceof Error ? streamError : new Error(String(streamError));
-          const isTransient =
-            /429|500|502|503|504|fetch|network|ECONNRESET|ETIMEDOUT|rate limit/i.test(
-              errorInstance.message,
-            );
-
-          if (attempt < maxRetries && isTransient && !effectiveSignal?.aborted) {
-            const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
-            yield {
-              type: 'retryScheduled',
-              attempt: attempt + 1,
-              maxRetries,
-              delayMs,
-              error: errorInstance,
-            };
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-            continue;
-          }
-          throw errorInstance;
+      for await (const chunk of streamResult.stream) {
+        if (chunk.type === "text-delta") {
+          yield {
+            type: "tokenDelta",
+            text: (chunk as any).delta ?? (chunk as any).text ?? "",
+            messageId: (chunk as any).id,
+          };
+        } else if (chunk.type === "reasoning-delta") {
+          yield {
+            type: "thoughtDelta",
+            text: (chunk as any).delta ?? (chunk as any).text ?? "",
+            messageId: (chunk as any).id,
+          };
+        } else if (chunk.type === "tool-call") {
+          const rawCall = chunk as any;
+          const toolCall = {
+            callId: rawCall.toolCallId ?? rawCall.id ?? randomUUID(),
+            toolName: rawCall.toolName,
+            parameters: rawCall.input ?? rawCall.args ?? {},
+          };
+          proposedToolCalls.push(toolCall);
+          yield {
+            type: "toolCallProposed",
+            callId: toolCall.callId,
+            toolName: toolCall.toolName,
+            parameters: toJsonValue(toolCall.parameters),
+          };
         }
       }
+
+      responseMessages = await streamResult.responseMessages;
+      rawUsage = await streamResult.usage;
 
       // Collect assistant response messages and step token metrics
       conversationMessages.push(...responseMessages);
       if (config.threadStore) {
         for (const msg of responseMessages) {
           await config.threadStore.appendTranscript(config.threadId, {
-            type: 'modelMessage',
+            type: "modelMessage",
             message: msg,
             timestamp: Date.now(),
           });
@@ -335,7 +345,7 @@ export async function* runTurn(
         promptTokens: rawUsage.inputTokens ?? 0,
         completionTokens: rawUsage.outputTokens ?? 0,
         totalTokens: rawUsage.totalTokens ?? 0,
-        ...(typeof rawUsage.outputTokenDetails?.reasoningTokens === 'number'
+        ...(typeof rawUsage.outputTokenDetails?.reasoningTokens === "number"
           ? { reasoningTokens: rawUsage.outputTokenDetails.reasoningTokens }
           : {}),
       };
@@ -343,72 +353,55 @@ export async function* runTurn(
       totalPromptTokens += stepUsage.promptTokens;
       totalCompletionTokens += stepUsage.completionTokens;
       totalTokens += stepUsage.totalTokens;
-      if (typeof stepUsage.reasoningTokens === 'number') {
+      if (stepUsage.reasoningTokens) {
         totalReasoningTokens += stepUsage.reasoningTokens;
       }
 
-      // If no tool calls were proposed, evaluate completion
+      // If the model called no tools, evaluate whether stopping is allowed
       if (proposedToolCalls.length === 0) {
         if (config.hooks?.onShouldStop) {
           const stopDecision = await config.hooks.onShouldStop({
             turnIndex,
-            finishReason: 'completed',
+            finishReason: "completed",
             transcript: conversationMessages,
           });
 
           if (!stopDecision.shouldStop) {
             const reminderMessage: ModelMessage = {
-              role: 'user',
+              role: "user",
               content: stopDecision.reminderPrompt,
             };
             conversationMessages.push(reminderMessage);
 
             if (config.threadStore) {
               await config.threadStore.appendTranscript(config.threadId, {
-                type: 'modelMessage',
+                type: "modelMessage",
                 message: reminderMessage,
                 timestamp: Date.now(),
               });
             }
 
             yield {
-              type: 'stepFinished',
+              type: "stepFinished",
               stepIndex,
               usage: stepUsage,
             };
 
-            stepIndex++;
             continue;
           }
         }
 
-        finishReason = 'completed';
         yield {
-          type: 'stepFinished',
+          type: "stepFinished",
           stepIndex,
           usage: stepUsage,
         };
 
-        yield {
-          type: 'turnFinished',
-          turnIndex,
-          finishReason,
-          totalUsage: buildTotalUsage(),
-        };
-
-        if (config.threadStore) {
-          await config.threadStore.appendTranscript(config.threadId, {
-            type: 'turnFinished',
-            turnIndex,
-            finishReason,
-            timestamp: Date.now(),
-          });
-        }
-
-        return;
+        finishReason = "completed";
+        break;
       }
 
-      // Execute proposed tool calls
+      // Execute proposed tools
       const toolResults: Array<{
         toolCallId: string;
         toolName: string;
@@ -417,28 +410,24 @@ export async function* runTurn(
       }> = [];
 
       for (const toolCall of proposedToolCalls) {
-        if (config.threadStore) {
-          await config.threadStore.appendTranscript(config.threadId, {
-            type: 'toolCall',
-            callId: toolCall.callId,
-            toolName: toolCall.toolName,
-            parameters: toolCall.parameters,
-            timestamp: Date.now(),
-          });
+        if (effectiveSignal?.aborted) {
+          finishReason = "interrupted";
+          break;
         }
 
         const agentTool = config.tools.resolve(toolCall.toolName);
+
         if (!agentTool) {
           const missingErrorResult = {
             isError: true,
-            error: `Tool "${toolCall.toolName}" is not registered in ToolRegistry.`,
+            error: `Tool "${toolCall.toolName}" is not registered in the tool registry.`,
           };
 
           yield {
-            type: 'toolExecutionFinished',
+            type: "toolExecutionFinished",
             callId: toolCall.callId,
             toolName: toolCall.toolName,
-            result: missingErrorResult,
+            result: toJsonValue(missingErrorResult),
             isError: true,
             durationMs: 0,
           };
@@ -452,7 +441,7 @@ export async function* runTurn(
 
           if (config.threadStore) {
             await config.threadStore.appendTranscript(config.threadId, {
-              type: 'toolResult',
+              type: "toolResult",
               callId: toolCall.callId,
               toolName: toolCall.toolName,
               result: missingErrorResult,
@@ -474,10 +463,10 @@ export async function* runTurn(
           };
 
           yield {
-            type: 'toolExecutionFinished',
+            type: "toolExecutionFinished",
             callId: toolCall.callId,
             toolName: toolCall.toolName,
-            result: schemaErrorResult,
+            result: toJsonValue(schemaErrorResult),
             isError: true,
             durationMs: 0,
           };
@@ -491,7 +480,7 @@ export async function* runTurn(
 
           if (config.threadStore) {
             await config.threadStore.appendTranscript(config.threadId, {
-              type: 'toolResult',
+              type: "toolResult",
               callId: toolCall.callId,
               toolName: toolCall.toolName,
               result: schemaErrorResult,
@@ -505,7 +494,7 @@ export async function* runTurn(
         // Tool authorization check - FAIL CLOSED BY DEFAULT FOR ALL TOOLS
         let isAllowed = false;
         let denialReason =
-          'Tool execution denied: no authorization policy configured. All tools fail closed by default.';
+          "Tool execution denied: no authorization policy configured. All tools fail closed by default.";
 
         if (config.hooks?.onAuthorizeTool) {
           try {
@@ -515,9 +504,9 @@ export async function* runTurn(
               workingDirectory: config.workingDirectory,
             });
 
-            if (decision.decision === 'allow') {
+            if (decision.decision === "allow") {
               isAllowed = true;
-            } else if (decision.decision === 'deny') {
+            } else if (decision.decision === "deny") {
               isAllowed = false;
               denialReason = decision.reason;
             }
@@ -534,10 +523,10 @@ export async function* runTurn(
           };
 
           yield {
-            type: 'toolExecutionFinished',
+            type: "toolExecutionFinished",
             callId: toolCall.callId,
             toolName: toolCall.toolName,
-            result: denialResult,
+            result: toJsonValue(denialResult),
             isError: true,
             durationMs: 0,
           };
@@ -551,7 +540,7 @@ export async function* runTurn(
 
           if (config.threadStore) {
             await config.threadStore.appendTranscript(config.threadId, {
-              type: 'toolResult',
+              type: "toolResult",
               callId: toolCall.callId,
               toolName: toolCall.toolName,
               result: denialResult,
@@ -562,79 +551,86 @@ export async function* runTurn(
           continue;
         }
 
-        // Emit toolExecutionStarted
+        // Execute authorized tool
         const startTime = Date.now();
         yield {
-          type: 'toolExecutionStarted',
+          type: "toolExecutionStarted",
           callId: toolCall.callId,
           toolName: toolCall.toolName,
           timestamp: startTime,
         };
 
+        const progressQueue = new AsyncEventQueue<AgentEvent>();
+
+        const executionContext: ToolExecutionContext = {
+          threadId: config.threadId,
+          toolCallId: toolCall.callId,
+          workingDirectory: config.workingDirectory,
+          abortSignal: effectiveSignal,
+          checkpointStore: config.checkpointStore,
+          isCheckpointEnabled,
+          taskManager: config.taskManager,
+          onCheckpointCreated: (evt) => {
+            const checkpointEvent: CheckpointCreatedEvent = {
+              type: "checkpointCreated",
+              checkpointId: evt.checkpointId,
+              sequence: evt.sequence,
+              label: evt.label,
+              filesTouched: evt.filesTouched,
+            };
+            progressQueue.push(checkpointEvent);
+          },
+          emitProgress: (chunk: string) => {
+            progressQueue.push({
+              type: "toolExecutionDelta",
+              callId: toolCall.callId,
+              toolName: toolCall.toolName,
+              chunk,
+            });
+          },
+        };
+
         let executionResult: unknown;
         let isToolError = false;
 
-        const progressQueue = new AsyncEventQueue<string>();
-        const capturedCheckpoints: CheckpointCreatedEvent[] = [];
-
-        const executePromise = (async () => {
+        const executionPromise = (async () => {
           try {
-            const executionContext: ToolExecutionContext = {
-              threadId: config.threadId,
-              toolCallId: toolCall.callId,
-              workingDirectory: config.workingDirectory,
-              abortSignal: effectiveSignal,
-              checkpointStore: config.checkpointStore,
-              isCheckpointEnabled,
-              taskManager: config.taskManager,
-              onCheckpointCreated: (cp) => {
-                capturedCheckpoints.push({
-                  type: 'checkpointCreated',
-                  checkpointId: cp.checkpointId,
-                  sequence: cp.sequence,
-                  label: cp.label,
-                  filesTouched: cp.filesTouched,
-                });
-              },
-              emitProgress: (chunk: string) => {
-                progressQueue.push(chunk);
-              },
-            };
-
             return await agentTool.execute(parsedParameters, executionContext);
-          } catch (error) {
+          } catch (execError) {
             isToolError = true;
             return {
               isError: true,
-              error: error instanceof Error ? error.message : String(error),
+              error:
+                execError instanceof Error
+                  ? execError.message
+                  : String(execError),
             };
           } finally {
             progressQueue.close();
           }
         })();
 
-        for await (const chunk of progressQueue) {
-          yield {
-            type: 'toolExecutionDelta',
-            callId: toolCall.callId,
-            toolName: toolCall.toolName,
-            chunk,
-          };
+        // Yield queued delta and checkpoint events as they arrive
+        for await (const progressEvent of progressQueue) {
+          yield progressEvent;
         }
 
-        executionResult = await executePromise;
+        executionResult = await executionPromise;
 
-        // Yield any checkpoints created by self-contained tools during execution
-        for (const cp of capturedCheckpoints) {
-          yield cp;
+        if (
+          executionResult &&
+          typeof executionResult === "object" &&
+          (executionResult as any).isError === true
+        ) {
+          isToolError = true;
         }
 
         const durationMs = Date.now() - startTime;
         yield {
-          type: 'toolExecutionFinished',
+          type: "toolExecutionFinished",
           callId: toolCall.callId,
           toolName: toolCall.toolName,
-          result: executionResult,
+          result: toJsonValue(executionResult),
           isError: isToolError,
           durationMs,
         };
@@ -648,7 +644,7 @@ export async function* runTurn(
 
         if (config.threadStore) {
           await config.threadStore.appendTranscript(config.threadId, {
-            type: 'toolResult',
+            type: "toolResult",
             callId: toolCall.callId,
             toolName: toolCall.toolName,
             result: executionResult,
@@ -660,16 +656,16 @@ export async function* runTurn(
 
       // Append tool results message
       conversationMessages.push({
-        role: 'tool',
+        role: "tool",
         content: toolResults.map((tr) => ({
-          type: 'tool-result',
+          type: "tool-result",
           toolCallId: tr.toolCallId,
           toolName: tr.toolName,
           output:
-            typeof tr.result === 'string'
+            typeof tr.result === "string"
               ? tr.result
               : {
-                  type: 'text',
+                  type: "text",
                   value: JSON.stringify(tr.result),
                 },
         })) as any,
@@ -677,18 +673,23 @@ export async function* runTurn(
 
       // Emit stepFinished
       yield {
-        type: 'stepFinished',
+        type: "stepFinished",
         stepIndex,
         usage: stepUsage,
       };
-
-      stepIndex++;
     }
 
-    // Step budget exhausted
-    finishReason = 'maxSteps';
+    if (finishReason === "completed" && conversationMessages.length > initialHistoryLength) {
+      // Check if maxSteps was hit
+      const lastMessage = conversationMessages[conversationMessages.length - 1];
+      if (lastMessage?.role === "tool") {
+        finishReason = "maxSteps";
+      }
+    }
+
+    // 4. Conclude turn
     yield {
-      type: 'turnFinished',
+      type: "turnFinished",
       turnIndex,
       finishReason,
       totalUsage: buildTotalUsage(),
@@ -696,37 +697,39 @@ export async function* runTurn(
 
     if (config.threadStore) {
       await config.threadStore.appendTranscript(config.threadId, {
-        type: 'turnFinished',
+        type: "turnFinished",
         turnIndex,
         finishReason,
         timestamp: Date.now(),
       });
     }
-  } catch (error) {
-    // Roll back in-progress conversation additions if unhandled exception occurs
+  } catch (turnError) {
+    const errorInstance =
+      turnError instanceof Error ? turnError : new Error(String(turnError));
+
+    // Rollback conversational messages added during failed turn
     conversationMessages.length = initialHistoryLength;
 
-    const errorInstance = error instanceof Error ? error : new Error(String(error));
-    finishReason = 'error';
+    finishReason = "error";
 
     yield {
-      type: 'error',
-      origin: 'engine',
-      error: errorInstance,
+      type: "error",
+      origin: "engine",
+      error: toErrorInfo(errorInstance),
       isFatal: true,
     };
 
     if (config.hooks?.onError) {
       await config.hooks.onError({
         error: errorInstance,
-        origin: 'engine',
+        origin: "engine",
         turnIndex,
         isFatal: true,
       });
     }
 
     yield {
-      type: 'turnFinished',
+      type: "turnFinished",
       turnIndex,
       finishReason,
       totalUsage: buildTotalUsage(),
@@ -734,16 +737,16 @@ export async function* runTurn(
 
     if (config.threadStore) {
       await config.threadStore.appendTranscript(config.threadId, {
-        type: 'turnFinished',
+        type: "turnFinished",
         turnIndex,
         finishReason,
         timestamp: Date.now(),
       });
     }
   } finally {
-    if (config.hooks?.onPostTurn) {
+    if (config.hooks?.onAfterTurn) {
       try {
-        await config.hooks.onPostTurn({
+        await config.hooks.onAfterTurn({
           turnIndex,
           finishReason,
           totalUsage: buildTotalUsage(),

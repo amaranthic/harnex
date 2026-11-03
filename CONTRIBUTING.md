@@ -61,7 +61,7 @@ To maintain high velocity, clean maintenance, and deep test coverage:
   2. [`tests/providers.test.ts`](tests/providers.test.ts) — Provider registry, custom provider registration, and mock HTTP endpoint.
   3. [`tests/runtime.test.ts`](tests/runtime.test.ts) — `generateText`, `streamText`, `generateObject`, and `./ai` subpath.
   4. [`tests/engine.test.ts`](tests/engine.test.ts) — Microkernel lifecycle, turn reservation, reasoning levels, and hook veto.
-  5. [`tests/tools.test.ts`](tests/tools.test.ts) — Built-in tools (`readFile`, `writeFile`, `editFile`, `bash`, `glob`, `grep`), path guards, and `ToolExecutionQueue`.
+  5. [`tests/tools.test.ts`](tests/tools.test.ts) — Built-in tools (`readFile`, `writeFile`, `editFile`, `bash`, `glob`, `grep`), path guards, and `TaskManagerTool`.
   6. [`tests/storage.test.ts`](tests/storage.test.ts) — Home directory resolution, atomic writes, file locking, JSONL append/recovery, and lossless value codec.
   7. [`tests/threads.test.ts`](tests/threads.test.ts) — `MemoryThreadStore` and `FileThreadStore` lifecycle and transcript reconstruction.
   8. [`tests/checkpoints.test.ts`](tests/checkpoints.test.ts) — `FileCheckpointStore`, SHA-256 content-addressed blobs, and restore conflict detection.

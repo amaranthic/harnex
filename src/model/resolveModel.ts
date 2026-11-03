@@ -1,28 +1,33 @@
+/**
+ * @fileoverview Single-string model resolution with mandatory credentials and first-slash routing.
+ * @packageDocumentation
+ */
+
 import type { LanguageModel } from "ai";
 import type {
-  GregCredentials,
-  GregModelInput,
+  HernexCredentials,
+  HernexModelInput,
   ParsedModelString,
 } from "./types.js";
 import {
-  InvalidModelStringError,
-  MissingCredentialsError,
+  HernexInvalidModelStringError,
+  HernexMissingCredentialsError,
 } from "../errors.js";
-import { getProviderAdapter, ProviderRegistry } from "./ProviderRegistry.js";
+import { defaultProviderRegistry, ProviderRegistry } from "./ProviderRegistry.js";
 
 /**
- * Parses a Greg model string according to the strict first-slash rule.
+ * Parses a Hernex model string according to the strict first-slash rule.
  *
  * Segments before the first slash represent the provider identifier, and all segments
  * after the first slash (including subsequent slashes) represent the model identifier.
  *
  * @param modelString - The model string to parse (e.g. "openai/gpt-4o", "openrouter/openrouter/free").
  * @returns The parsed model representation containing provider and modelId.
- * @throws {InvalidModelStringError} If the string is malformed, lacks a slash, or contains an empty provider or modelId.
+ * @throws {HernexInvalidModelStringError} If the string is malformed, lacks a slash, or contains an empty provider or modelId.
  */
 export function parseModelString(modelString: string): ParsedModelString {
   if (typeof modelString !== "string") {
-    throw new InvalidModelStringError({
+    throw new HernexInvalidModelStringError({
       modelString: String(modelString),
       reason: "Model identifier must be a string",
     });
@@ -31,7 +36,7 @@ export function parseModelString(modelString: string): ParsedModelString {
   const firstSlashIndex = modelString.indexOf("/");
 
   if (firstSlashIndex === -1) {
-    throw new InvalidModelStringError({
+    throw new HernexInvalidModelStringError({
       modelString,
       reason: "No '/' delimiter found",
     });
@@ -40,7 +45,7 @@ export function parseModelString(modelString: string): ParsedModelString {
   const provider = modelString.slice(0, firstSlashIndex).trim();
 
   if (provider.length === 0) {
-    throw new InvalidModelStringError({
+    throw new HernexInvalidModelStringError({
       modelString,
       reason: "Provider identifier before '/' is empty",
     });
@@ -49,7 +54,7 @@ export function parseModelString(modelString: string): ParsedModelString {
   const modelId = modelString.slice(firstSlashIndex + 1).trim();
 
   if (modelId.length === 0) {
-    throw new InvalidModelStringError({
+    throw new HernexInvalidModelStringError({
       modelString,
       reason: "Model identifier after '/' is empty",
     });
@@ -62,16 +67,16 @@ export function parseModelString(modelString: string): ParsedModelString {
 }
 
 /**
- * Validates mandatory credentials for a Greg request.
+ * Validates mandatory credentials for a Hernex request.
  *
- * Every Greg request mandates non-empty `apiKey` and `baseUrl` strings.
+ * Every Hernex request mandates non-empty `apiKey` and `baseUrl` strings.
  *
  * @param credentials - The credentials object to validate.
  * @param provider - The target provider name for descriptive error messaging.
- * @throws {MissingCredentialsError} If either `apiKey` or `baseUrl` is missing or empty.
+ * @throws {HernexMissingCredentialsError} If either `apiKey` or `baseUrl` is missing or empty.
  */
 export function validateCredentials(
-  credentials: GregCredentials,
+  credentials: HernexCredentials,
   provider: string,
 ): void {
   if (
@@ -79,7 +84,7 @@ export function validateCredentials(
     typeof credentials.apiKey !== "string" ||
     credentials.apiKey.trim().length === 0
   ) {
-    throw new MissingCredentialsError({
+    throw new HernexMissingCredentialsError({
       missingField: "apiKey",
       provider,
     });
@@ -89,7 +94,7 @@ export function validateCredentials(
     typeof credentials.baseUrl !== "string" ||
     credentials.baseUrl.trim().length === 0
   ) {
-    throw new MissingCredentialsError({
+    throw new HernexMissingCredentialsError({
       missingField: "baseUrl",
       provider,
     });
@@ -97,23 +102,24 @@ export function validateCredentials(
 }
 
 /**
- * Resolves a Greg model input (either a `provider/model_id` string or an existing LanguageModel)
+ * Resolves a Hernex model input (either a `provider/model_id` string or an existing LanguageModel)
  * into an instantiated AI SDK LanguageModel.
  *
  * Completely avoids fallthrough to default AI Gateway resolution by directly routing
- * through Greg's provider registry.
+ * through Hernex's provider registry.
  *
  * @param model - A `provider/model_id` string or an existing LanguageModel instance.
  * @param credentials - Mandatory credentials containing non-empty apiKey and baseUrl.
+ * @param providerRegistry - Optional isolated ProviderRegistry instance.
  * @returns A concrete AI SDK LanguageModel instance ready for execution.
- * @throws {InvalidModelStringError} If the model string is malformed.
- * @throws {MissingCredentialsError} If apiKey or baseUrl are missing.
- * @throws {UnsupportedProviderError} If the provider is unknown.
+ * @throws {HernexInvalidModelStringError} If the model string is malformed.
+ * @throws {HernexMissingCredentialsError} If apiKey or baseUrl are missing.
+ * @throws {HernexUnsupportedProviderError} If the provider is unknown.
  */
 export function resolveModel(
-  model: GregModelInput,
-  credentials: GregCredentials,
-  registry?: ProviderRegistry,
+  model: HernexModelInput,
+  credentials: HernexCredentials,
+  providerRegistry?: ProviderRegistry,
 ): LanguageModel {
   // If model is an object, treat as an existing pre-instantiated LanguageModel
   if (typeof model !== "string") {
@@ -122,7 +128,7 @@ export function resolveModel(
       return model as LanguageModel;
     }
 
-    throw new InvalidModelStringError({
+    throw new HernexInvalidModelStringError({
       modelString: String(model),
       reason: "Model must be a valid 'provider/model_id' string or an instantiated LanguageModel",
     });
@@ -132,9 +138,8 @@ export function resolveModel(
 
   validateCredentials(credentials, provider);
 
-  const adapter = registry
-    ? registry.resolve(provider)
-    : getProviderAdapter(provider);
+  const registry = providerRegistry ?? defaultProviderRegistry;
+  const adapter = registry.resolve(provider);
 
   return adapter.createModel(modelId, credentials);
 }

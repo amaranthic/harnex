@@ -1,13 +1,11 @@
 /**
- * @fileoverview Core engine subsystem exports for Greg Agent Core.
+ * @fileoverview Core engine subsystem exports for Hernex.
  * @packageDocumentation
  */
 
 export type {
   AgentEngineConfig,
   RunTurnOptions,
-} from './engineConfig.js';
+} from "./engineConfig.js";
 
-export { runTurn } from './runTurn.js';
-export { AgentEngine } from './AgentEngine.js';
-export { AsyncEventQueue } from './eventQueue.js';
+export { AgentEngine } from "./AgentEngine.js";

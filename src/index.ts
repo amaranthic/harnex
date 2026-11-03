@@ -7,10 +7,6 @@
  * @packageDocumentation
  */
 
-import { z } from "zod";
-
-export { z };
-
 // Core Model and Provider Runtime
 export {
   resolveModel,
@@ -20,28 +16,17 @@ export {
 
 export {
   ProviderRegistry,
-  createProviderRegistry,
-  registerProviderAdapter,
-  getSupportedProviders,
-  hasProvider,
-  getProviderAdapter,
   builtInAdapters,
 } from "./model/ProviderRegistry.js";
 
 export type {
   ParsedModelString,
-  GregCredentials,
   HernexCredentials,
   ProviderAdapter,
-  GregModelInput,
   HernexModelInput,
-  GregRequest,
-  GregGenerateTextParameters,
-  GregStreamTextParameters,
-  GregGenerateObjectParameters,
-  GregStreamObjectParameters,
-  GregEmbedParameters,
-  GregEmbedManyParameters,
+  HernexRequest,
+  HernexGenerateTextParameters,
+  HernexStreamTextParameters,
   LanguageModel,
   ModelMessage,
 } from "./model/types.js";
@@ -50,29 +35,15 @@ export type {
 export {
   generateText,
   streamText,
-  generateObject,
-  streamObject,
-  embed,
-  embedMany,
 } from "./runtime.js";
 
 export type {
   HernexGenerateTextOptions,
   HernexStreamTextOptions,
-  HernexGenerateObjectOptions,
-  HernexStreamObjectOptions,
-  HernexEmbedOptions,
-  HernexEmbedManyOptions,
-  GregGenerateTextOptions,
-  GregStreamTextOptions,
-  GregGenerateObjectOptions,
-  GregStreamObjectOptions,
 } from "./runtime.js";
 
 // Microkernel Agent Engine
 export { AgentEngine } from "./engine/AgentEngine.js";
-export { runTurn } from "./engine/runTurn.js";
-export { AsyncEventQueue } from "./engine/eventQueue.js";
 
 export type {
   AgentEngineConfig,
@@ -82,7 +53,6 @@ export type {
 // Tool System & Standard Tools
 export {
   ToolRegistry,
-  ToolExecutionQueue,
   ReadFileTool,
   WriteFileTool,
   EditFileTool,
@@ -105,15 +75,12 @@ export {
   taskManagerDescription,
   defaultRetentionTtlMs,
   defaultMaxRetainedTasks,
-  resolvePathWithinWorkspace,
-  getSafeBashEnvironment,
 } from "./tools/index.js";
 
 export type {
   AgentTool,
   ToolExecutionContext,
   ToolRegistryOptions,
-  SdkToolAdapterOptions,
   ReadFileOutput,
   WriteFileOutput,
   EditFileOutput,
@@ -131,24 +98,6 @@ export type {
   GrepOutput,
   GrepMatch,
 } from "./tools/index.js";
-
-// Storage & Persistence Primitives
-export {
-  resolveHomeDirectory,
-  atomicWriteFile,
-  withFileLock,
-  appendJsonl,
-  readJsonl,
-  encodeValue,
-  decodeValue,
-} from "./storage/index.js";
-
-export type {
-  ResolveHomeDirectoryOptions,
-  AtomicWriteOptions,
-  LockPayload,
-  EncodedValue,
-} from "./storage/index.js";
 
 // Thread Sessions & Stores
 export {
@@ -199,31 +148,32 @@ export type {
   TurnFinishReason,
   CheckpointCreatedEvent,
   ErrorEvent,
-  RetryScheduledEvent,
+  JsonValue,
+  ErrorInfo,
+  ErrorOrigin,
 } from "./events/index.js";
+
+export { composeAgentHooks } from "./hooks/index.js";
 
 export type {
   AgentHooks,
-  PreTurnContext,
-  PreTurnResult,
-  OnPreTurnHook,
-  PostTurnContext,
-  OnPostTurnHook,
+  BeforeTurnContext,
+  BeforeTurnResult,
+  BeforeTurnHook,
+  AfterTurnContext,
+  AfterTurnHook,
   ShouldStopContext,
   StopDecision,
-  OnShouldStopHook,
-  ToolAuthorizeContext,
+  ShouldStopHook,
+  AuthorizeToolContext,
   PermissionDecision,
-  OnAuthorizeToolHook,
-  ThreadErrorContext,
-  OnErrorHook,
+  AuthorizeToolHook,
+  ErrorContext,
+  ErrorHook,
 } from "./hooks/index.js";
 
 // Structured Errors
 export {
-  InvalidModelStringError,
-  MissingCredentialsError,
-  UnsupportedProviderError,
   HernexInvalidModelStringError,
   HernexMissingCredentialsError,
   HernexUnsupportedProviderError,

@@ -13,6 +13,7 @@ import {
   type AgentTool,
   type ToolExecutionContext,
   ToolRegistry,
+  composeAgentHooks,
 } from '../src/index.js';
 
 /**
@@ -179,8 +180,8 @@ describe('AgentEngine Core Invariants', () => {
     const callLog: string[] = [];
 
     const hooks: AgentHooks = {
-      onPreTurn: (context) => {
-        callLog.push(`preTurn:${context.turnIndex}`);
+      onBeforeTurn: (context) => {
+        callLog.push(`beforeTurn:${context.turnIndex}`);
         return { injectedInstructions: 'Be concise.' };
       },
       onAuthorizeTool: (context) => {
@@ -191,8 +192,8 @@ describe('AgentEngine Core Invariants', () => {
         callLog.push(`shouldStop:${context.finishReason}`);
         return { shouldStop: true };
       },
-      onPostTurn: (context) => {
-        callLog.push(`postTurn:${context.finishReason}`);
+      onAfterTurn: (context) => {
+        callLog.push(`afterTurn:${context.finishReason}`);
       },
       onError: (context) => {
         callLog.push(`error:${context.origin}`);
@@ -203,7 +204,7 @@ describe('AgentEngine Core Invariants', () => {
     expect(engine).toBeDefined();
 
     // Verify hooks are callable according to their contracts
-    hooks.onPreTurn!({ turnIndex: 1, userPrompt: 'Hello' });
+    hooks.onBeforeTurn!({ turnIndex: 1, userPrompt: 'Hello' });
     hooks.onAuthorizeTool!({
       toolName: 'mockMutate',
       parameters: { filePath: 'foo.ts', data: 'test' },
@@ -213,7 +214,7 @@ describe('AgentEngine Core Invariants', () => {
       turnIndex: 1,
       finishReason: 'completed',
     });
-    hooks.onPostTurn!({
+    hooks.onAfterTurn!({
       turnIndex: 1,
       finishReason: 'completed',
       totalUsage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
@@ -226,10 +227,10 @@ describe('AgentEngine Core Invariants', () => {
     });
 
     expect(callLog).toEqual([
-      'preTurn:1',
+      'beforeTurn:1',
       'authorize:mockMutate',
       'shouldStop:completed',
-      'postTurn:completed',
+      'afterTurn:completed',
       'error:engine',
     ]);
   });
@@ -263,11 +264,11 @@ describe('AgentEngine Core Invariants', () => {
     expect(finishEvent.finishReason).toBe('error');
   });
 
-  it('honors pre-turn hook veto without appending user messages or starting model steps', async () => {
+  it('honors before-turn hook veto without appending user messages or starting model steps', async () => {
     const engine = new AgentEngine(
       createBaseConfig({
         hooks: {
-          onPreTurn: () => ({
+          onBeforeTurn: () => ({
             veto: true,
             vetoReason: 'User rate limit exceeded',
           }),
@@ -316,5 +317,66 @@ describe('AgentEngine Core Invariants', () => {
     const updatedCheckpoints = await engine.listCheckpoints();
     expect(updatedCheckpoints.length).toBe(1);
     expect(updatedCheckpoints[0]?.id).toBe(createdCheckpoint.id);
+  });
+
+  it('composes hooks deterministically with composeAgentHooks', async () => {
+    const layer1: AgentHooks = {
+      onBeforeTurn: (ctx) => ({
+        userPrompt: `${ctx.userPrompt} (layer1)`,
+        injectedInstructions: 'Instruction 1',
+      }),
+      onShouldStop: () => ({ shouldStop: true }),
+      onAuthorizeTool: () => ({ decision: 'allow' }),
+    };
+
+    const layer2: AgentHooks = {
+      onBeforeTurn: (ctx) => ({
+        userPrompt: `${ctx.userPrompt} (layer2)`,
+        injectedInstructions: 'Instruction 2',
+      }),
+      onShouldStop: () => ({ shouldStop: false, reminderPrompt: 'Keep going' }),
+      onAuthorizeTool: () => ({ decision: 'allow' }),
+    };
+
+    const composed = composeAgentHooks([layer1, layer2]);
+
+    const beforeResult = await composed.onBeforeTurn!({ turnIndex: 1, userPrompt: 'Initial' });
+    expect(beforeResult?.userPrompt).toBe('Initial (layer1) (layer2)');
+    expect(beforeResult?.injectedInstructions).toBe('Instruction 1\n\nInstruction 2');
+
+    const stopDecision = await composed.onShouldStop!({
+      turnIndex: 1,
+      finishReason: 'completed',
+    });
+    expect(stopDecision.shouldStop).toBe(false);
+    if (!stopDecision.shouldStop) {
+      expect(stopDecision.reminderPrompt).toBe('Keep going');
+    }
+
+    const authDecision = await composed.onAuthorizeTool!({
+      toolName: 'testTool',
+      parameters: {},
+      workingDirectory: '/tmp',
+    });
+    expect(authDecision.decision).toBe('allow');
+  });
+
+  it('serializes all event types to pure JSON without native Error leakage', () => {
+    const errorEvent = {
+      type: 'error' as const,
+      origin: 'engine' as const,
+      error: {
+        name: 'HernexError',
+        message: 'Something went wrong',
+      },
+      isFatal: true,
+    };
+
+    const serialized = JSON.stringify(errorEvent);
+    expect(serialized).toContain('"name":"HernexError"');
+    expect(serialized).toContain('"message":"Something went wrong"');
+    const parsed = JSON.parse(serialized);
+    expect(parsed.error instanceof Error).toBe(false);
+    expect(typeof parsed.error).toBe('object');
   });
 });

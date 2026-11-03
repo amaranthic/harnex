@@ -3,18 +3,20 @@
  * @packageDocumentation
  */
 
+import type { JsonValue } from "./types.js";
+
 /**
  * Event emitted when the model proposes a tool invocation with parsed arguments.
  */
 export interface ToolCallProposedEvent {
   /** Discriminant event type. */
-  readonly type: 'toolCallProposed';
+  readonly type: "toolCallProposed";
   /** Unique identifier for the proposed tool call. */
   readonly callId: string;
   /** Name of the tool to be executed. */
   readonly toolName: string;
   /** Parsed arguments supplied by the model. */
-  readonly parameters: unknown;
+  readonly parameters: JsonValue;
 }
 
 /**
@@ -22,7 +24,7 @@ export interface ToolCallProposedEvent {
  */
 export interface ToolExecutionStartedEvent {
   /** Discriminant event type. */
-  readonly type: 'toolExecutionStarted';
+  readonly type: "toolExecutionStarted";
   /** Unique identifier for the tool call. */
   readonly callId: string;
   /** Name of the tool being executed. */
@@ -36,7 +38,7 @@ export interface ToolExecutionStartedEvent {
  */
 export interface ToolExecutionDeltaEvent {
   /** Discriminant event type. */
-  readonly type: 'toolExecutionDelta';
+  readonly type: "toolExecutionDelta";
   /** Unique identifier for the tool call. */
   readonly callId: string;
   /** Name of the tool producing output. */
@@ -50,13 +52,13 @@ export interface ToolExecutionDeltaEvent {
  */
 export interface ToolExecutionFinishedEvent {
   /** Discriminant event type. */
-  readonly type: 'toolExecutionFinished';
+  readonly type: "toolExecutionFinished";
   /** Unique identifier for the tool call. */
   readonly callId: string;
   /** Name of the tool that executed. */
   readonly toolName: string;
   /** Execution output or structured return payload. */
-  readonly result: unknown;
+  readonly result: JsonValue;
   /** Whether the tool finished in an error state. */
   readonly isError: boolean;
   /** Total wall-clock execution duration in milliseconds. */

@@ -64,24 +64,9 @@ export interface ToolExecutionContext {
 ## 3. Tool Concurrency & Serialization
 
 > [!NOTE]
-> Tool concurrency and thread-safety are managed at the tool level, not inside the engine loop.
+> Tool execution ordering is serialized deterministically within the autonomous turn loop of `AgentEngine` (`runTurn`).
 
-For tools that perform non-concurrency-safe operations (such as shared workspace mutations or sequential shell sessions), Hernex provides [`ToolExecutionQueue`](file:///home/nolan/works/harnex/src/tools/ToolExecutionQueue.ts#L58-L110):
-
-```typescript
-export class ToolExecutionQueue {
-  public async run<T>(
-    task: () => Promise<T>,
-    abortSignal?: AbortSignal,
-  ): Promise<T>;
-}
-```
-
-### 3.1 Queue Guarantees
-
-1. **FIFO Serialization**: Asynchronous tasks execute strictly in arrival order. A task does not begin until the prior task settles.
-2. **Cancellation Isolation**: If an enqueued task is cancelled via `abortSignal`, the underlying promise still settles before the subsequent task runs, preventing resource contention and race conditions.
-3. **Signal Racing**: The helper `raceWithSignal` immediately rejects on abort without unhandled promise leaks.
+Tool invocations proposed by the model are executed sequentially in arrival order. Pre-execution checks (schema validation, authorization) and post-execution hooks settle deterministically for each tool before the subsequent tool runs.
 
 ---
 

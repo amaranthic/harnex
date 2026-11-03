@@ -4,11 +4,9 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import http from "node:http";
-import { z } from "zod";
 import {
   generateText,
   streamText,
-  generateObject,
 } from "../src/index.js";
 import * as aiEscapeHatch from "../src/ai.js";
 
@@ -139,21 +137,6 @@ describe("runtimeExecution", () => {
     }
 
     expect(accumulatedText).toBe("Streaming text works!");
-  });
-
-  it("should execute generateObject and validate structured JSON output", async () => {
-    const result = await generateObject({
-      model: "compatible/custom/fast",
-      apiKey: "test-token",
-      baseUrl: serverBaseUrl,
-      schema: z.object({
-        name: z.string(),
-        age: z.number(),
-      }),
-      prompt: "Generate person",
-    });
-
-    expect(result.object).toEqual({ name: "Alice", age: 30 });
   });
 
   it("should expose raw AI SDK functionality through ./ai escape hatch", () => {

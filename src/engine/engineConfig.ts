@@ -3,11 +3,11 @@
  * @packageDocumentation
  */
 
-import type { LanguageModel } from "../model/types.js";
+import type { HernexModelInput } from "../model/types.js";
+import type { ProviderRegistry } from "../model/ProviderRegistry.js";
 import type { AgentHooks } from "../hooks/index.js";
 import type {
   AgentReasoningLevel,
-  ThreadCheckpointConfig,
   ThreadStore,
 } from "../threads/index.js";
 import type { CheckpointStore } from "../checkpoints/index.js";
@@ -31,7 +31,7 @@ export interface AgentEngineConfig {
   /**
    * Model specification formatted as "provider/model_id" or a pre-instantiated LanguageModel.
    */
-  readonly model: string | LanguageModel;
+  readonly model: HernexModelInput;
 
   /**
    * Mandatory API key used for resolving provider credentials.
@@ -44,14 +44,19 @@ export interface AgentEngineConfig {
   readonly baseUrl: string;
 
   /**
-   * Optional system instructions passed to the model across all turns.
-   */
-  readonly instructions?: string | undefined;
-
-  /**
    * Tool registry supplying available agent tools and schema definitions.
    */
   readonly tools: ToolRegistry;
+
+  /**
+   * Optional custom provider registry for isolated resolution.
+   */
+  readonly providerRegistry?: ProviderRegistry | undefined;
+
+  /**
+   * Optional system instructions passed to the model across all turns.
+   */
+  readonly instructions?: string | undefined;
 
   /**
    * Optional TaskManager instance for background shell process management.
@@ -86,7 +91,7 @@ export interface AgentEngineConfig {
    * Invariant: Requires `persist: true`. If `persist` is false, checkpointing is strictly disabled.
    * Defaults to false.
    */
-  readonly checkpoint?: boolean | ThreadCheckpointConfig | undefined;
+  readonly checkpoint?: boolean | undefined;
 
   /**
    * Optional global abort signal for cancelling in-flight engine operations.
@@ -134,7 +139,7 @@ export interface RunTurnOptions {
   /**
    * Optional per-turn model override formatted as "provider/model_id" or a LanguageModel.
    */
-  readonly model?: string | LanguageModel;
+  readonly model?: HernexModelInput;
 
   /**
    * Optional API key override for the per-turn model.
@@ -159,5 +164,5 @@ export interface RunTurnOptions {
   /**
    * Optional product-defined metadata passed through to turn hooks.
    */
-  readonly metadataOverride?: Record<string, unknown>;
+  readonly metadataOverride?: Readonly<Record<string, unknown>>;
 }

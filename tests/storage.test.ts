@@ -14,7 +14,7 @@ import {
   readJsonl,
   encodeValue,
   decodeValue,
-} from "../src/index.js";
+} from "../src/storage/index.js";
 
 describe("storage primitives", () => {
   let testDir: string;

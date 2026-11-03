@@ -6,11 +6,11 @@ The composite hook container is defined by [`AgentHooks`](file:///home/nolan/wor
 
 ```typescript
 export interface AgentHooks {
-  readonly onAuthorizeTool?: OnAuthorizeToolHook | undefined;
-  readonly onPreTurn?: OnPreTurnHook | undefined;
-  readonly onPostTurn?: OnPostTurnHook | undefined;
-  readonly onShouldStop?: OnShouldStopHook | undefined;
-  readonly onError?: OnErrorHook | undefined;
+  readonly onAuthorizeTool?: AuthorizeToolHook | undefined;
+  readonly onBeforeTurn?: BeforeTurnHook | undefined;
+  readonly onAfterTurn?: AfterTurnHook | undefined;
+  readonly onShouldStop?: ShouldStopHook | undefined;
+  readonly onError?: ErrorHook | undefined;
 }
 ```
 
@@ -59,23 +59,23 @@ No tool is automatically exempted from authorization. If the hook implementation
 
 ---
 
-## 2. Pre-Turn Hook: `onPreTurn`
+## 2. Before-Turn Hook: `onBeforeTurn`
 
 ### 2.1 Specification & Signature
 
-The [`OnPreTurnHook`](file:///home/nolan/works/harnex/src/hooks/turnHooks.ts#L36-L38) executes before an autonomous turn starts. It permits mutating user inputs, injecting dynamic system instructions, or vetoing turn execution.
+The `BeforeTurnHook` executes before an autonomous turn starts. It permits mutating user inputs, injecting dynamic system instructions, or vetoing turn execution.
 
 ```typescript
-export type OnPreTurnHook = (
-  context: PreTurnContext,
-) => Promise<PreTurnResult | void> | PreTurnResult | void;
+export type BeforeTurnHook = (
+  context: BeforeTurnContext,
+) => Promise<BeforeTurnResult | void> | BeforeTurnResult | void;
 
-export interface PreTurnContext {
+export interface BeforeTurnContext {
   readonly turnIndex: number;
   readonly userPrompt: string;
 }
 
-export interface PreTurnResult {
+export interface BeforeTurnResult {
   readonly userPrompt?: string;
   readonly injectedInstructions?: string;
   readonly veto?: boolean;
@@ -90,21 +90,21 @@ export interface PreTurnResult {
 - **Turn Veto**: If `veto: true` is returned:
   1. The user prompt is **not** appended to conversational history.
   2. The step loop is bypassed entirely.
-  3. The turn terminates immediately with [`finishReason: 'vetoed'`](file:///home/nolan/works/harnex/src/events/stepEvents.ts#L29).
-  4. A [`turnFinished`](file:///home/nolan/works/harnex/src/events/stepEvents.ts#L72-L81) event is yielded with empty token usage.
+  3. The turn terminates immediately with `finishReason: 'vetoed'`.
+  4. A `turnFinished` event is yielded with empty token usage.
 
 ---
 
-## 3. Post-Turn Hook: `onPostTurn`
+## 3. After-Turn Hook: `onAfterTurn`
 
 ### 3.1 Specification & Signature
 
-The [`OnPostTurnHook`](file:///home/nolan/works/harnex/src/hooks/turnHooks.ts#L56) executes at the absolute conclusion of a turn, after all steps and events have completed.
+The `AfterTurnHook` executes at the absolute conclusion of a turn, after all steps and events have completed.
 
 ```typescript
-export type OnPostTurnHook = (context: PostTurnContext) => Promise<void> | void;
+export type AfterTurnHook = (context: AfterTurnContext) => Promise<void> | void;
 
-export interface PostTurnContext {
+export interface AfterTurnContext {
   readonly turnIndex: number;
   readonly finishReason: TurnFinishReason;
   readonly totalUsage: StepTokenUsage;
@@ -113,8 +113,8 @@ export interface PostTurnContext {
 
 ### 3.2 Execution Timing & Error Isolation
 
-- **Guaranteed Execution**: `onPostTurn` is invoked inside the `finally` block of [`runTurn`](file:///home/nolan/works/harnex/src/engine/runTurn.ts#L743-L753), guaranteeing invocation regardless of normal completion, cancellation, step budget exhaustion, or fatal runtime errors.
-- **Exception Containment**: Any exception thrown within `onPostTurn` is caught and swallowed by the engine to ensure clean finalization and prevent masking the actual turn result.
+- **Guaranteed Execution**: `onAfterTurn` is invoked inside the `finally` block of `runTurn`, guaranteeing invocation regardless of normal completion, cancellation, step budget exhaustion, or fatal runtime errors.
+- **Exception Containment**: Any exception thrown within `onAfterTurn` is caught and swallowed by the engine to ensure clean finalization and prevent masking the actual turn result.
 
 ---
 

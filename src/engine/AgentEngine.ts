@@ -63,12 +63,7 @@ export class AgentEngine {
 
     // Enforce invariant: checkpoints require persistent thread identity; if persist is false, checkpoint is strictly false
     this.isCheckpointActive =
-      this.isPersistActive &&
-      Boolean(
-        typeof config.checkpoint === "boolean"
-          ? config.checkpoint
-          : config.checkpoint?.enabled ?? Boolean(config.checkpointStore),
-      );
+      this.isPersistActive && Boolean(config.checkpoint ?? Boolean(config.checkpointStore));
 
     // Resolve stores according to persistence flags
     if (this.isPersistActive) {

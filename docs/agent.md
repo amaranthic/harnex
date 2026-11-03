@@ -88,7 +88,7 @@ If the caller overrides the target model for this specific turn, the engine vali
 The engine yields a [`turnStarted`](file:///home/nolan/works/harnex/src/events/stepEvents.ts#L36-L43) event and records the event in the persistent transcript if persistence is active.
 
 ### Step 4: Pre-Turn Hook Evaluation
-The engine invokes [`hooks.onPreTurn`](file:///home/nolan/works/harnex/src/hooks/turnHooks.ts#L36-L38):
+The engine invokes `hooks.onBeforeTurn`:
 - If `veto: true`, execution terminates immediately with `finishReason: 'vetoed'`, yielding `turnFinished`.
 - If `userPrompt` is returned, it replaces the user input.
 - If `injectedInstructions` is returned, it is appended to instructions for this turn.
@@ -129,7 +129,7 @@ If `maxSteps` is reached without task completion, the engine concludes with `fin
 The engine emits [`turnFinished`](file:///home/nolan/works/harnex/src/events/stepEvents.ts#L72-L81) containing final token usage and the finish reason.
 
 ### Step 10: Post-Turn Cleanups
-Inside the `finally` block of the turn runner, the engine dispatches [`hooks.onPostTurn`](file:///home/nolan/works/harnex/src/hooks/turnHooks.ts#L56) with cumulative token usage and the final termination reason.
+Inside the `finally` block of the turn runner, the engine dispatches `hooks.onAfterTurn` with cumulative token usage and the final termination reason.
 
 ---
 

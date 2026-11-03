@@ -5,18 +5,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import http from "node:http";
 import {
-  getSupportedProviders,
-  hasProvider,
-  getProviderAdapter,
+  ProviderRegistry,
   resolveModel,
   generateText,
-  createProviderRegistry,
-  UnsupportedProviderError,
+  HernexUnsupportedProviderError,
 } from "../src/index.js";
 
 describe("providerResolution", () => {
-  it("should contain all 13 supported providers in the registry", () => {
-    const supported = getSupportedProviders();
+  it("should contain all 13 supported providers in the default ProviderRegistry", () => {
+    const registry = new ProviderRegistry();
+    const supported = registry.list();
     const expected = [
       "openai",
       "anthropic",
@@ -33,30 +31,37 @@ describe("providerResolution", () => {
       "vercelgateway",
     ];
 
+    expect(supported).toHaveLength(13);
     for (const provider of expected) {
       expect(supported).toContain(provider);
-      expect(hasProvider(provider)).toBe(true);
+      expect(registry.has(provider)).toBe(true);
     }
   });
 
-  it("should return false for unknown providers in hasProvider", () => {
-    expect(hasProvider("unknown-ai")).toBe(false);
-    expect(hasProvider("gateway")).toBe(false);
+  it("should return false for unknown providers in registry.has()", () => {
+    const registry = new ProviderRegistry();
+    expect(registry.has("unknown-ai")).toBe(false);
+    expect(registry.has("gateway")).toBe(false);
   });
 
-  it("should throw UnsupportedProviderError for unregistered providers", () => {
+  it("should throw HernexUnsupportedProviderError for unregistered providers", () => {
+    const registry = new ProviderRegistry();
     expect(() =>
-      resolveModel("unknown-ai/some-model", {
-        apiKey: "test-key",
-        baseUrl: "https://api.unknown.com",
-      }),
-    ).toThrow(UnsupportedProviderError);
+      resolveModel(
+        "unknown-ai/some-model",
+        {
+          apiKey: "test-key",
+          baseUrl: "https://api.unknown.com",
+        },
+        registry,
+      ),
+    ).toThrow(HernexUnsupportedProviderError);
 
     try {
-      getProviderAdapter("non-existent");
+      registry.resolve("non-existent");
     } catch (error) {
-      expect(UnsupportedProviderError.isInstance(error)).toBe(true);
-      if (UnsupportedProviderError.isInstance(error)) {
+      expect(HernexUnsupportedProviderError.isInstance(error)).toBe(true);
+      if (HernexUnsupportedProviderError.isInstance(error)) {
         expect(error.provider).toBe("non-existent");
         expect(error.supportedProviders).toContain("openai");
         expect(error.message).toContain("compatible/model_name");
@@ -64,9 +69,9 @@ describe("providerResolution", () => {
     }
   });
 
-  it("should support isolated ProviderRegistry instances and custom registration", () => {
-    const registry = createProviderRegistry([]);
-    expect(registry.getSupportedProviders()).toHaveLength(0);
+  it("should support isolated ProviderRegistry instances, custom registration, and duplicate rejection", () => {
+    const registry = new ProviderRegistry([]);
+    expect(registry.list()).toHaveLength(0);
 
     const mockAdapter = {
       providerId: "mock-provider",
@@ -81,6 +86,8 @@ describe("providerResolution", () => {
     registry.register(mockAdapter);
     expect(registry.has("mock-provider")).toBe(true);
     expect(registry.resolve("mock-provider")).toBe(mockAdapter);
+
+    expect(() => registry.register(mockAdapter)).toThrow(/already registered/);
 
     const resolved = resolveModel(
       "mock-provider/fast-v1",

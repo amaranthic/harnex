@@ -1,28 +1,14 @@
 import { createMistral } from "@ai-sdk/mistral";
 import type { LanguageModel } from "ai";
-import type { ProviderAdapter } from "./base.js";
-import type { GregCredentials } from "../types.js";
+import type { ProviderAdapter, HernexCredentials } from "../types.js";
 
 /**
- * Adapter for the official Mistral AI provider (`@ai-sdk/mistral`).
- *
- * Configures Mistral AI with mandatory credentials and instantiates
- * Mistral LanguageModel instances via `createMistral`.
+ * Adapter for Mistral provider (`@ai-sdk/mistral`).
  */
 export class MistralProviderAdapter implements ProviderAdapter {
-  /**
-   * The provider identifier.
-   */
   readonly providerId = "mistral";
 
-  /**
-   * Instantiates a Mistral LanguageModel.
-   *
-   * @param modelId - The Mistral model identifier (e.g. "mistral-large-latest", "pixtral-large-latest").
-   * @param credentials - Mandatory credentials containing apiKey and baseUrl.
-   * @returns An instantiated Mistral LanguageModel.
-   */
-  createModel(modelId: string, credentials: GregCredentials): LanguageModel {
+  createModel(modelId: string, credentials: HernexCredentials): LanguageModel {
     const provider = createMistral({
       apiKey: credentials.apiKey,
       baseURL: credentials.baseUrl,
@@ -32,7 +18,4 @@ export class MistralProviderAdapter implements ProviderAdapter {
   }
 }
 
-/**
- * Singleton instance of the MistralProviderAdapter.
- */
 export const mistralProviderAdapter = new MistralProviderAdapter();

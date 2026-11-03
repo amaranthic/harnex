@@ -1,13 +1,16 @@
 /**
- * @fileoverview Test suite for model string parsing and credential validation.
+ * @fileoverview Test suite for model string parsing, credential validation, and ProviderRegistry isolation.
  */
 
 import { describe, expect, it } from "bun:test";
 import {
   parseModelString,
   validateCredentials,
-  InvalidModelStringError,
-  MissingCredentialsError,
+  resolveModel,
+  ProviderRegistry,
+  HernexInvalidModelStringError,
+  HernexMissingCredentialsError,
+  type ProviderAdapter,
 } from "../src/index.js";
 
 describe("modelParsing", () => {
@@ -35,49 +38,49 @@ describe("modelParsing", () => {
     expect(result.modelId).toBe("claude-3-5-sonnet");
   });
 
-  it("should throw InvalidModelStringError when no slash is present", () => {
-    expect(() => parseModelString("gpt-4o")).toThrow(InvalidModelStringError);
+  it("should throw HernexInvalidModelStringError when no slash is present", () => {
+    expect(() => parseModelString("gpt-4o")).toThrow(HernexInvalidModelStringError);
 
     try {
       parseModelString("gpt-4o");
     } catch (error) {
-      expect(InvalidModelStringError.isInstance(error)).toBe(true);
-      if (InvalidModelStringError.isInstance(error)) {
+      expect(HernexInvalidModelStringError.isInstance(error)).toBe(true);
+      if (HernexInvalidModelStringError.isInstance(error)) {
         expect(error.modelString).toBe("gpt-4o");
         expect(error.message).toContain("No '/' delimiter found");
       }
     }
   });
 
-  it("should throw InvalidModelStringError when provider segment is empty", () => {
-    expect(() => parseModelString("/gpt-4o")).toThrow(InvalidModelStringError);
+  it("should throw HernexInvalidModelStringError when provider segment is empty", () => {
+    expect(() => parseModelString("/gpt-4o")).toThrow(HernexInvalidModelStringError);
 
     try {
       parseModelString("/gpt-4o");
     } catch (error) {
-      expect(InvalidModelStringError.isInstance(error)).toBe(true);
-      if (InvalidModelStringError.isInstance(error)) {
+      expect(HernexInvalidModelStringError.isInstance(error)).toBe(true);
+      if (HernexInvalidModelStringError.isInstance(error)) {
         expect(error.message).toContain("Provider identifier before '/' is empty");
       }
     }
   });
 
-  it("should throw InvalidModelStringError when modelId segment is empty", () => {
-    expect(() => parseModelString("openai/")).toThrow(InvalidModelStringError);
+  it("should throw HernexInvalidModelStringError when modelId segment is empty", () => {
+    expect(() => parseModelString("openai/")).toThrow(HernexInvalidModelStringError);
 
     try {
       parseModelString("openai/");
     } catch (error) {
-      expect(InvalidModelStringError.isInstance(error)).toBe(true);
-      if (InvalidModelStringError.isInstance(error)) {
+      expect(HernexInvalidModelStringError.isInstance(error)).toBe(true);
+      if (HernexInvalidModelStringError.isInstance(error)) {
         expect(error.message).toContain("Model identifier after '/' is empty");
       }
     }
   });
 
-  it("should throw InvalidModelStringError when given non-string input", () => {
+  it("should throw HernexInvalidModelStringError when given non-string input", () => {
     // @ts-expect-error Testing non-string input
-    expect(() => parseModelString(12345)).toThrow(InvalidModelStringError);
+    expect(() => parseModelString(12345)).toThrow(HernexInvalidModelStringError);
   });
 });
 
@@ -94,25 +97,25 @@ describe("credentialsValidation", () => {
     }).not.toThrow();
   });
 
-  it("should throw MissingCredentialsError when apiKey is missing or null", () => {
+  it("should throw HernexMissingCredentialsError when apiKey is missing or null", () => {
     // @ts-expect-error Testing missing apiKey
     expect(() => validateCredentials({ baseUrl: "https://api.openai.com/v1" }, "openai")).toThrow(
-      MissingCredentialsError,
+      HernexMissingCredentialsError,
     );
 
     try {
       // @ts-expect-error Testing missing apiKey
       validateCredentials({ baseUrl: "https://api.openai.com/v1" }, "openai");
     } catch (error) {
-      expect(MissingCredentialsError.isInstance(error)).toBe(true);
-      if (MissingCredentialsError.isInstance(error)) {
+      expect(HernexMissingCredentialsError.isInstance(error)).toBe(true);
+      if (HernexMissingCredentialsError.isInstance(error)) {
         expect(error.missingField).toBe("apiKey");
         expect(error.provider).toBe("openai");
       }
     }
   });
 
-  it("should throw MissingCredentialsError when apiKey is an empty string", () => {
+  it("should throw HernexMissingCredentialsError when apiKey is an empty string", () => {
     expect(() =>
       validateCredentials(
         {
@@ -121,28 +124,28 @@ describe("credentialsValidation", () => {
         },
         "openai",
       ),
-    ).toThrow(MissingCredentialsError);
+    ).toThrow(HernexMissingCredentialsError);
   });
 
-  it("should throw MissingCredentialsError when baseUrl is missing", () => {
+  it("should throw HernexMissingCredentialsError when baseUrl is missing", () => {
     // @ts-expect-error Testing missing baseUrl
     expect(() => validateCredentials({ apiKey: "sk-valid-key" }, "anthropic")).toThrow(
-      MissingCredentialsError,
+      HernexMissingCredentialsError,
     );
 
     try {
       // @ts-expect-error Testing missing baseUrl
       validateCredentials({ apiKey: "sk-valid-key" }, "anthropic");
     } catch (error) {
-      expect(MissingCredentialsError.isInstance(error)).toBe(true);
-      if (MissingCredentialsError.isInstance(error)) {
+      expect(HernexMissingCredentialsError.isInstance(error)).toBe(true);
+      if (HernexMissingCredentialsError.isInstance(error)) {
         expect(error.missingField).toBe("baseUrl");
         expect(error.provider).toBe("anthropic");
       }
     }
   });
 
-  it("should throw MissingCredentialsError when baseUrl is an empty string", () => {
+  it("should throw HernexMissingCredentialsError when baseUrl is an empty string", () => {
     expect(() =>
       validateCredentials(
         {
@@ -151,6 +154,59 @@ describe("credentialsValidation", () => {
         },
         "anthropic",
       ),
-    ).toThrow(MissingCredentialsError);
+    ).toThrow(HernexMissingCredentialsError);
+  });
+
+  it("requires valid credentials for LanguageModel object inputs in resolveModel", () => {
+    const mockModel = { specificationVersion: "v1", provider: "mock", modelId: "test" } as any;
+
+    expect(() =>
+      resolveModel(mockModel, { apiKey: "", baseUrl: "https://mock.com" }),
+    ).toThrow(HernexMissingCredentialsError);
+
+    expect(() =>
+      resolveModel(mockModel, { apiKey: "key", baseUrl: "" }),
+    ).toThrow(HernexMissingCredentialsError);
+
+    expect(
+      resolveModel(mockModel, { apiKey: "key", baseUrl: "https://mock.com" }),
+    ).toBe(mockModel);
+  });
+});
+
+describe("ProviderRegistry Isolation & Management", () => {
+  it("rejects duplicate provider registration", () => {
+    const registry = new ProviderRegistry([]);
+    const adapter: ProviderAdapter = {
+      providerId: "custom",
+      createModel: () => ({}) as any,
+    };
+
+    registry.register(adapter);
+    expect(() => registry.register(adapter)).toThrow(
+      /already registered/,
+    );
+  });
+
+  it("unregisters and lists registered providers accurately", () => {
+    const registry = new ProviderRegistry([]);
+    const adapter1: ProviderAdapter = {
+      providerId: "provider1",
+      createModel: () => ({}) as any,
+    };
+    const adapter2: ProviderAdapter = {
+      providerId: "provider2",
+      createModel: () => ({}) as any,
+    };
+
+    registry.register(adapter1);
+    registry.register(adapter2);
+    expect(registry.list()).toEqual(["provider1", "provider2"]);
+    expect(registry.has("provider1")).toBe(true);
+
+    expect(registry.unregister("provider1")).toBe(true);
+    expect(registry.has("provider1")).toBe(false);
+    expect(registry.list()).toEqual(["provider2"]);
+    expect(registry.unregister("provider1")).toBe(false);
   });
 });
