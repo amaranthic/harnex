@@ -2,8 +2,9 @@
  * @fileoverview Test suite for storage primitives: homeDirectory, atomicFile, lock, jsonl, and valueCodec.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -86,6 +87,87 @@ describe("storage primitives", () => {
       const bytes = await atomicWriteFile(dest, buffer);
       expect(bytes).toBe(5);
       expect(readFileSync(dest)).toEqual(buffer);
+    });
+
+    it("replaces existing destination file content cleanly without corruption", async () => {
+      const dest = path.join(testDir, "replace.txt");
+      await atomicWriteFile(dest, "initial content version 1");
+      expect(readFileSync(dest, "utf-8")).toBe("initial content version 1");
+
+      const bytes = await atomicWriteFile(dest, "updated content version 2");
+      expect(bytes).toBe(25);
+      expect(readFileSync(dest, "utf-8")).toBe("updated content version 2");
+
+      const siblingFiles = readdirSync(testDir);
+      const lingeringTemps = siblingFiles.filter((f) => f.startsWith("replace.txt.tmp."));
+      expect(lingeringTemps).toHaveLength(0);
+    });
+
+    it("handles concurrent writes with unique cryptographically random sibling temp names", async () => {
+      const dest = path.join(testDir, "concurrent.txt");
+      const writesCount = 15;
+      const promises = Array.from({ length: writesCount }, (_, i) =>
+        atomicWriteFile(dest, `payload-data-${i}`),
+      );
+
+      const results = await Promise.all(promises);
+      expect(results).toHaveLength(writesCount);
+      expect(existsSync(dest)).toBe(true);
+      const finalContent = readFileSync(dest, "utf-8");
+      expect(finalContent).toMatch(/^payload-data-\d+$/);
+
+      const siblingFiles = readdirSync(testDir);
+      const lingeringTemps = siblingFiles.filter((f) => f.startsWith("concurrent.txt.tmp."));
+      expect(lingeringTemps).toHaveLength(0);
+    });
+
+    it("cleans up sibling temp file on write or rename failure", async () => {
+      const dest = path.join(testDir, "cleanup_fail.txt");
+      const renameSpy = spyOn(fsPromises, "rename").mockImplementation(async () => {
+        throw new Error("simulated rename failure");
+      });
+
+      try {
+        await expect(atomicWriteFile(dest, "failed content")).rejects.toThrow(
+          "simulated rename failure",
+        );
+      } finally {
+        renameSpy.mockRestore();
+      }
+
+      const siblingFiles = readdirSync(testDir);
+      const lingeringTemps = siblingFiles.filter((f) => f.startsWith("cleanup_fail.txt.tmp."));
+      expect(lingeringTemps).toHaveLength(0);
+    });
+
+    it("combines primary write error and cleanup failure into AggregateError", async () => {
+      const dest = path.join(testDir, "aggregate_fail.txt");
+      const renameSpy = spyOn(fsPromises, "rename").mockImplementation(async () => {
+        throw new Error("simulated primary rename error");
+      });
+      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(async () => {
+        throw new Error("simulated cleanup error");
+      });
+
+      try {
+        let thrownError: unknown = null;
+        try {
+          await atomicWriteFile(dest, "aggregate test content");
+        } catch (error) {
+          thrownError = error;
+        }
+
+        expect(thrownError).toBeInstanceOf(AggregateError);
+        const agg = thrownError as AggregateError;
+        expect(agg.errors).toHaveLength(2);
+        expect((agg.errors[0] as Error).message).toBe("simulated primary rename error");
+        expect((agg.errors[1] as Error).message).toBe("simulated cleanup error");
+        expect(agg.message).toContain("Failed to atomically write");
+        expect(agg.message).toContain("failed to clean up temporary file");
+      } finally {
+        renameSpy.mockRestore();
+        unlinkSpy.mockRestore();
+      }
     });
   });
 
