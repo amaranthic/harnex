@@ -108,13 +108,11 @@ export type {
   ThreadStatus,
   ThreadMetadata,
   TranscriptEntry,
+  NewTranscriptEntry,
   CreateThreadInput,
+  UpdateThreadInput,
   ThreadStore,
   AgentReasoningLevel,
-  ThreadCheckpointConfig,
-  ThreadGitMeta,
-  ThreadEnvironmentMeta,
-  ThreadTokenUsage,
 } from "./threads/index.js";
 
 // Checkpoints & Content-Addressed Delta Storage

@@ -12,6 +12,7 @@ import {
   type ThreadMetadata,
   type ThreadStore,
   type TranscriptEntry,
+  type UpdateThreadInput,
 } from "../threads/index.js";
 import {
   FileCheckpointStore,
@@ -123,7 +124,7 @@ export class AgentEngine {
       throw new Error(`Thread not found: "${threadId}"`);
     }
 
-    const messages = await options.threadStore.loadMessages(threadId);
+    const messages = await options.threadStore.getMessages(threadId);
 
     return new AgentEngine(
       {
@@ -331,14 +332,12 @@ export class AgentEngine {
    * @returns The updated ThreadMetadata object, or undefined if ephemeral.
    */
   public async updateMetadata(
-    patch: Partial<
-      Omit<ThreadMetadata, "id" | "createdAt" | "activeTranscriptSequence">
-    >,
+    patch: UpdateThreadInput,
   ): Promise<ThreadMetadata | undefined> {
     if (!this.resolvedThreadStore) {
       return undefined;
     }
-    return await this.resolvedThreadStore.updateThreadMetadata(
+    return await this.resolvedThreadStore.updateThread(
       this.threadId,
       patch,
     );
@@ -353,7 +352,7 @@ export class AgentEngine {
     if (!this.resolvedThreadStore) {
       return [];
     }
-    return await this.resolvedThreadStore.loadTranscript(this.threadId);
+    return await this.resolvedThreadStore.getTranscript(this.threadId);
   }
 
   /**
