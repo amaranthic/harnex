@@ -3,118 +3,117 @@
  * @packageDocumentation
  */
 
-import { existsSync, realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 /**
- * Validates and resolves a target path, ensuring it stays strictly within the workspace root.
+ * Validates and resolves a target path, ensuring it stays strictly within the workspace root
+ * and does not traverse through or terminate at any symbolic links.
  *
- * Prevents directory traversal (`..`), escaped absolute paths, and symlink escapes.
+ * Enforces strict filesystem containment:
+ * - Canonicalizes the workspace root directory.
+ * - Rejects directory traversals (`..`) and outside absolute paths using strict relative boundary checks.
+ * - Inspects every existing path segment with `lstatSync` to reject all symbolic links (both intermediate directories and target files).
+ * - Stops at the first `ENOENT` so writes to not-yet-created files remain possible.
+ * - Propagates permission and I/O failures without swallowing.
  *
  * @param targetPath - Path requested by tool arguments.
- * @param rootDir - Normalized workspace root directory.
+ * @param rootDir - Workspace root directory.
  * @returns Fully resolved absolute path within the workspace root.
- * @throws Error if the path escapes the allowed workspace root.
+ * @throws Error if the path escapes the workspace root or encounters a symbolic link.
+ *
+ * @example
+ * ```typescript
+ * const safePath = resolvePathWithinWorkspace("src/index.ts", "/path/to/workspace");
+ * ```
  */
 export function resolvePathWithinWorkspace(
   targetPath: string,
   rootDir: string,
 ): string {
   const normalizedRoot = resolve(rootDir);
-  const resolvedTarget = isAbsolute(targetPath)
-    ? resolve(targetPath)
-    : resolve(normalizedRoot, targetPath);
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = realpathSync(normalizedRoot);
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "ENOENT"
+    ) {
+      canonicalRoot = normalizedRoot;
+    } else {
+      throw error;
+    }
+  }
 
-  const relativePath = relative(normalizedRoot, resolvedTarget);
-  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+  let resolvedTarget: string;
+  if (isAbsolute(targetPath)) {
+    const relFromNormalized = relative(normalizedRoot, resolve(targetPath));
+    const isInsideNormalized =
+      relFromNormalized === "" ||
+      (!isAbsolute(relFromNormalized) &&
+        relFromNormalized !== ".." &&
+        !relFromNormalized.startsWith(".." + sep));
+
+    if (isInsideNormalized) {
+      resolvedTarget = resolve(canonicalRoot, relFromNormalized);
+    } else {
+      resolvedTarget = resolve(targetPath);
+    }
+  } else {
+    resolvedTarget = resolve(canonicalRoot, targetPath);
+  }
+
+  const rel = relative(canonicalRoot, resolvedTarget);
+  const isWithin =
+    rel === "" ||
+    (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep));
+
+  if (!isWithin) {
     throw new Error(
       `Access denied: path "${targetPath}" resolves outside the allowed workspace directory.`,
     );
   }
 
-  // If path exists, verify realpath does not point outside workspace
-  if (existsSync(resolvedTarget)) {
-    try {
-      const canonicalTarget = realpathSync(resolvedTarget);
-      const canonicalRoot = realpathSync(normalizedRoot);
-      const canonicalRelative = relative(canonicalRoot, canonicalTarget);
-      if (
-        canonicalRelative.startsWith("..") ||
-        isAbsolute(canonicalRelative)
-      ) {
-        throw new Error(
-          `Access denied: symlink "${targetPath}" points outside the allowed workspace directory.`,
-        );
+  if (rel !== "") {
+    const segments = rel.split(sep).filter(Boolean);
+    let currentPath = canonicalRoot;
+
+    for (const segment of segments) {
+      currentPath = resolve(currentPath, segment);
+      try {
+        const stats = lstatSync(currentPath);
+        if (stats.isSymbolicLink()) {
+          throw new Error(
+            `Access denied: path "${targetPath}" contains symbolic link "${segment}".`,
+          );
+        }
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          error.message.startsWith("Access denied:")
+        ) {
+          throw error;
+        }
+
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          (error as { code: string }).code === "ENOENT"
+        ) {
+          // Missing component encountered: stop inspecting further components
+          // so writes to not-yet-created files remain possible.
+          break;
+        }
+
+        // Propagate all other permission/IO errors
+        throw error;
       }
-    } catch {
-      // In case realpath throws (e.g. permission error), fall back to resolvedTarget
     }
   }
 
   return resolvedTarget;
-}
-
-/**
- * Sensitive environment variable name patterns that must never leak into shell executions.
- */
-const SENSITIVE_ENV_PATTERN =
-  /(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH|HERNEX_HOME|GREG_)/i;
-
-/**
- * Standard host environment variables safe to forward to child shell processes.
- */
-const SAFE_ENV_VARS = new Set([
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "LC_MESSAGES",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "PWD",
-  "EDITOR",
-  "VISUAL",
-  "PAGER",
-  "NODE_PATH",
-  "NODE_ENV",
-]);
-
-/**
- * Constructs a sanitized environment dictionary for shell command execution.
- *
- * Filters out all host API keys, authentication tokens, and secrets by default.
- *
- * @param extraAllowlist - Optional list of additional environment variable names to forward.
- * @returns Clean environment record safe for subprocess execution.
- */
-export function getSafeBashEnvironment(
-  extraAllowlist?: readonly string[],
-): Record<string, string> {
-  const safeEnv: Record<string, string> = {
-    TERM: "dumb",
-  };
-
-  const allowedSet = new Set<string>(extraAllowlist ?? []);
-
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value === undefined) {
-      continue;
-    }
-
-    if (allowedSet.has(key)) {
-      safeEnv[key] = value;
-      continue;
-    }
-
-    if (SAFE_ENV_VARS.has(key) && !SENSITIVE_ENV_PATTERN.test(key)) {
-      safeEnv[key] = value;
-    }
-  }
-
-  return safeEnv;
 }

@@ -10,7 +10,7 @@ import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
-import { getSafeBashEnvironment } from "./internal/pathGuard.js";
+import { getSafeBashEnvironment } from "./internal/bashEnvironment.js";
 import { bashDescription } from "./prompts.js";
 
 /**

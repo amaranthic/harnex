@@ -5,11 +5,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { AsyncEventQueue } from "../src/engine/eventQueue.js";
+import { resolvePathWithinWorkspace } from "../src/tools/internal/pathGuard.js";
+import { getSafeBashEnvironment } from "../src/tools/internal/bashEnvironment.js";
 import {
   type AgentTool,
   BashTool,
@@ -353,6 +355,86 @@ describe("Built-in File & Shell Tools", () => {
     await expect(
       readTool.execute({ filePath: "../../etc/passwd" }, context),
     ).rejects.toThrow("resolves outside");
+  });
+
+  it("enforces strict path containment, symlink rejection, and missing leaf tolerance", () => {
+    const canonicalWs = realpathSync(testWorkspace);
+
+    // 1. Root equality
+    expect(resolvePathWithinWorkspace(".", testWorkspace)).toBe(canonicalWs);
+    expect(resolvePathWithinWorkspace(testWorkspace, testWorkspace)).toBe(canonicalWs);
+
+    // 2. Traversal rejection
+    expect(() => resolvePathWithinWorkspace("..", testWorkspace)).toThrow("resolves outside");
+    expect(() => resolvePathWithinWorkspace("../outside.txt", testWorkspace)).toThrow("resolves outside");
+    expect(() => resolvePathWithinWorkspace("/etc/passwd", testWorkspace)).toThrow("resolves outside");
+
+    // 3. Dot-dot prefixed filename inside workspace (..notes)
+    const notesPath = resolvePathWithinWorkspace("..notes", testWorkspace);
+    expect(notesPath).toBe(join(canonicalWs, "..notes"));
+
+    // 4. Missing leaf in existing directory is allowed (for creating new files)
+    const newFilePath = resolvePathWithinWorkspace("nested_missing/file.txt", testWorkspace);
+    expect(newFilePath).toBe(join(canonicalWs, "nested_missing/file.txt"));
+
+    // 5. Final symlink component rejection
+    const targetReal = join(testWorkspace, "real_target.txt");
+    writeFileSync(targetReal, "content", "utf8");
+    const symlinkFile = join(testWorkspace, "link_file.txt");
+    symlinkSync(targetReal, symlinkFile);
+
+    expect(() => resolvePathWithinWorkspace("link_file.txt", testWorkspace)).toThrow(
+      "contains symbolic link",
+    );
+
+    // 6. Symlink parent directory with missing child rejection (no bypass on missing leaf)
+    const outsideDir = join(tmpdir(), `harnex_outside_${Date.now()}`);
+    mkdirSync(outsideDir, { recursive: true });
+    const symlinkDir = join(testWorkspace, "link_dir");
+    symlinkSync(outsideDir, symlinkDir, "dir");
+
+    try {
+      expect(() =>
+        resolvePathWithinWorkspace("link_dir/missing_child.txt", testWorkspace),
+      ).toThrow("contains symbolic link");
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+
+    // 7. Internal symlink directory rejection
+    const internalDir = join(testWorkspace, "internal_dir");
+    mkdirSync(internalDir, { recursive: true });
+    const internalSymlink = join(testWorkspace, "internal_symlink");
+    symlinkSync(internalDir, internalSymlink, "dir");
+
+    expect(() =>
+      resolvePathWithinWorkspace("internal_symlink/file.txt", testWorkspace),
+    ).toThrow("contains symbolic link");
+  });
+
+  it("constructs sanitized bash environment with allowlist support", () => {
+    const prevKey = process.env.TEST_API_KEY;
+    const prevCustom = process.env.CUSTOM_ALLOWED_VAR;
+    process.env.TEST_API_KEY = "sensitive_key_val";
+    process.env.CUSTOM_ALLOWED_VAR = "forwarded_val";
+
+    try {
+      const sanitized = getSafeBashEnvironment(["CUSTOM_ALLOWED_VAR"]);
+      expect(sanitized.TERM).toBe("dumb");
+      expect(sanitized.TEST_API_KEY).toBeUndefined();
+      expect(sanitized.CUSTOM_ALLOWED_VAR).toBe("forwarded_val");
+    } finally {
+      if (prevKey !== undefined) {
+        process.env.TEST_API_KEY = prevKey;
+      } else {
+        delete process.env.TEST_API_KEY;
+      }
+      if (prevCustom !== undefined) {
+        process.env.CUSTOM_ALLOWED_VAR = prevCustom;
+      } else {
+        delete process.env.CUSTOM_ALLOWED_VAR;
+      }
+    }
   });
 
   it("sanitizes environment variables in BashTool, stripping API keys and secrets", async () => {
