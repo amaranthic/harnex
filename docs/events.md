@@ -1,275 +1,101 @@
-# Outward Streaming Event Catalog Specification
+# Streaming Events & Observability
 
-This document specifies the schema, discriminated union, serialization guarantees, and lifecycle emission sequence of all outward streaming events in `@amaranthic/hernex`.
-
-The stream output of [`AgentEngine.runTurn`](file:///home/nolan/works/harnex/src/engine/AgentEngine.ts#L439-L468) is an `AsyncGenerator<AgentEvent, void, void>`.
-
-All events conform to the [`AgentEvent`](file:///home/nolan/works/harnex/src/events/index.ts#L75-L88) discriminated union:
-
-```typescript
-export type AgentEvent =
-  | TurnStartedEvent
-  | StepStartedEvent
-  | TokenDeltaEvent
-  | ThoughtDeltaEvent
-  | ToolCallProposedEvent
-  | ToolExecutionStartedEvent
-  | ToolExecutionDeltaEvent
-  | CheckpointCreatedEvent
-  | ToolExecutionFinishedEvent
-  | StepFinishedEvent
-  | TurnFinishedEvent
-  | RetryScheduledEvent
-  | ErrorEvent;
-```
+`AgentEngine.runTurn` returns an `AsyncGenerator<AgentEvent, void, void>` yielding pure, serializable JSON events. This stream gives products real-time visibility into token generation, tool calls, and lifecycle stages.
 
 ---
 
-## 1. Serialization Guarantees
+## 1. JSON Serialization Guarantee
 
 > [!IMPORTANT]
-> **Pure Serializable JSON Objects**
-> Every `AgentEvent` object is guaranteed to be a plain serializable JSON data structure. No events contain callbacks, function closures, or circular references. All fields are primitive values, read-only arrays, or plain nested objects.
+> Every `AgentEvent` is strictly JSON-serializable (`JsonValue`). Events never contain circular references, class instances, native `Error` objects, or function callbacks. Errors are normalized into [`ErrorInfo`](../src/events/types.ts).
 
 ---
 
-## 2. Event Catalog & Schemas
+## 2. Consuming the Event Stream
 
-### 2.1 Turn Lifecycle Events
-
-#### `turnStarted`
-Emitted at the initiation of an autonomous turn before input processing or model generation begins.
+Events are discriminated by the `type` property in `camelCase`:
 
 ```typescript
-export interface TurnStartedEvent {
-  readonly type: "turnStarted";
-  readonly turnIndex: number;
-  readonly userMessage: string;
-}
-```
+import { AgentEngine, type AgentEvent } from "@amaranthic/hernex";
 
-#### `turnFinished`
-Emitted at the conclusion of an autonomous turn, providing the final termination reason and cumulative token usage across all executed steps.
+for await (const event of engine.runTurn("Refactor src/storage.ts")) {
+  switch (event.type) {
+    case "turnStarted":
+      console.log(`[Turn ${event.turnIndex}] Prompt: ${event.userMessage}`);
+      break;
 
-```typescript
-export interface TurnFinishedEvent {
-  readonly type: "turnFinished";
-  readonly turnIndex: number;
-  readonly finishReason: TurnFinishReason;
-  readonly totalUsage: StepTokenUsage;
-}
+    case "stepStarted":
+      console.log(`Step ${event.stepIndex} starting...`);
+      break;
 
-export type TurnFinishReason =
-  | "completed"
-  | "maxSteps"
-  | "maxTurns"
-  | "interrupted"
-  | "error"
-  | "vetoed"
-  | "lengthExceeded"
-  | "contentFilter";
+    case "tokenDelta":
+      process.stdout.write(event.text);
+      break;
 
-export interface StepTokenUsage {
-  readonly promptTokens: number;
-  readonly completionTokens: number;
-  readonly totalTokens: number;
-  readonly reasoningTokens?: number;
-}
-```
+    case "thoughtDelta":
+      process.stdout.write(`\x1b[90m${event.text}\x1b[0m`);
+      break;
 
----
+    case "toolCallProposed":
+      console.log(`\nProposed tool: ${event.toolName} (Call ID: ${event.callId})`);
+      break;
 
-### 2.2 Step Lifecycle Events
+    case "toolExecutionStarted":
+      console.log(`Executing ${event.toolName}...`);
+      break;
 
-#### `stepStarted`
-Emitted at the commencement of each autonomous step iteration within the multi-step turn loop.
+    case "toolExecutionDelta":
+      // Real-time stdout from long-running tools like Bash
+      process.stdout.write(event.chunk);
+      break;
 
-```typescript
-export interface StepStartedEvent {
-  readonly type: "stepStarted";
-  readonly stepIndex: number;
-  readonly timestamp: number;
-}
-```
+    case "checkpointCreated":
+      console.log(`Snapshot saved: ${event.label} (ID: ${event.checkpointId})`);
+      break;
 
-#### `stepFinished`
-Emitted when a step's generation and all associated tool executions complete.
+    case "toolExecutionFinished":
+      console.log(`Tool ${event.toolName} finished in ${event.durationMs}ms (error: ${event.isError})`);
+      break;
 
-```typescript
-export interface StepFinishedEvent {
-  readonly type: "stepFinished";
-  readonly stepIndex: number;
-  readonly usage?: StepTokenUsage;
+    case "stepFinished":
+      console.log(`Step ${event.stepIndex} finished. Usage:`, event.usage);
+      break;
+
+    case "error":
+      console.error(`Error [${event.origin}]:`, event.error.message);
+      break;
+
+    case "turnFinished":
+      console.log(`\nTurn completed. Finish reason: ${event.finishReason}`);
+      console.log("Total usage:", event.totalUsage);
+      break;
+  }
 }
 ```
 
 ---
 
-### 2.3 Model Streaming Events
+## 3. Event Types & Schemas
 
-#### `tokenDelta`
-Emitted incrementally as textual response tokens stream from the model provider.
+### 3.1 Turn Lifecycle Events
+- **`turnStarted`**: Emitted when turn begins. Fields: `turnIndex`, `userMessage`.
+- **`turnFinished`**: Exactly **one** `turnFinished` event is guaranteed for every started turn (across veto, model completion, tool error, abort, or failure).
+  - `finishReason`: `"completed" | "maxSteps" | "interrupted" | "error" | "vetoed" | "lengthExceeded" | "contentFilter"`.
+  - `totalUsage`: Cumulative [`StepTokenUsage`](../src/events/stepEvents.ts) across all steps in the turn.
 
-```typescript
-export interface TokenDeltaEvent {
-  readonly type: "tokenDelta";
-  readonly text: string;
-  readonly messageId?: string;
-}
-```
+### 3.2 Model Stream Events
+- **`tokenDelta`**: Standard generated text delta chunks. Fields: `text`, optional `messageId`.
+- **`thoughtDelta`**: Reasoning tokens emitted by extended-thinking models. Fields: `text`, optional `messageId`.
 
-#### `thoughtDelta`
-Emitted incrementally when extended thinking or reasoning tokens stream from reasoning models (e.g. OpenAI o-series, Claude 3.7 Sonnet thinking mode).
+### 3.3 Tool Events
+- **`toolCallProposed`**: Emitted when model calls a tool with validated parameters. Fields: `callId`, `toolName`, `parameters` (`JsonValue`).
+- **`toolExecutionStarted`**: Emitted immediately before tool execution begins. Fields: `callId`, `toolName`, `timestamp`.
+- **`toolExecutionDelta`**: Streaming live output chunks from long-running operations. Fields: `callId`, `toolName`, `chunk`.
+- **`toolExecutionFinished`**: Emitted when tool completes. Fields: `callId`, `toolName`, `result` (`JsonValue`), `isError`, `durationMs`.
+- **`checkpointCreated`**: Emitted after file changes are committed to a snapshot. Fields: `checkpointId`, `sequence`, `label`, `filesTouched`.
 
-```typescript
-export interface ThoughtDeltaEvent {
-  readonly type: "thoughtDelta";
-  readonly text: string;
-  readonly messageId?: string;
-}
-```
-
----
-
-### 2.4 Tool Execution Events
-
-#### `toolCallProposed`
-Emitted as soon as the model yields a complete tool call with parsed parameters.
-
-```typescript
-export interface ToolCallProposedEvent {
-  readonly type: "toolCallProposed";
-  readonly callId: string;
-  readonly toolName: string;
-  readonly parameters: unknown;
-}
-```
-
-#### `toolExecutionStarted`
-Emitted immediately before an authorized tool begins execution on the host machine.
-
-```typescript
-export interface ToolExecutionStartedEvent {
-  readonly type: "toolExecutionStarted";
-  readonly callId: string;
-  readonly toolName: string;
-  readonly timestamp: number;
-}
-```
-
-#### `toolExecutionDelta`
-Emitted when a tool produces incremental streaming output (e.g. standard output chunks during shell execution).
-
-```typescript
-export interface ToolExecutionDeltaEvent {
-  readonly type: "toolExecutionDelta";
-  readonly callId: string;
-  readonly toolName: string;
-  readonly chunk: string;
-}
-```
-
-#### `toolExecutionFinished`
-Emitted when tool execution terminates, recording the result, execution duration, and error status.
-
-```typescript
-export interface ToolExecutionFinishedEvent {
-  readonly type: "toolExecutionFinished";
-  readonly callId: string;
-  readonly toolName: string;
-  readonly result: unknown;
-  readonly isError: boolean;
-  readonly durationMs: number;
-}
-```
-
----
-
-### 2.5 State & Checkpoint Events
-
-#### `checkpointCreated`
-Emitted when a tool or engine operation captures a content-addressed snapshot of modified workspace files.
-
-```typescript
-export interface CheckpointCreatedEvent {
-  readonly type: "checkpointCreated";
-  readonly checkpointId: string;
-  readonly sequence: number;
-  readonly label: string;
-  readonly filesTouched: readonly string[];
-}
-```
-
----
-
-### 2.6 Resilience & Error Events
-
-#### `retryScheduled`
-Emitted when an upstream provider error (HTTP 429 rate limit, 503 gateway unavailable, or network drop) triggers an exponential backoff delay before retrying.
-
-```typescript
-export interface RetryScheduledEvent {
-  readonly type: "retryScheduled";
-  readonly attempt: number;
-  readonly maxRetries: number;
-  readonly delayMs: number;
-  readonly error: Error;
-}
-```
-
-#### `error`
-Emitted when an unhandled exception occurs during turn execution.
-
-```typescript
-export interface ErrorEvent {
-  readonly type: "error";
-  readonly error: Error;
-  readonly origin: ErrorOrigin;
-  readonly toolName?: string;
-  readonly isFatal: boolean;
-}
-
-export type ErrorOrigin = "model" | "tool" | "checkpoint" | "permission" | "engine";
-```
-
----
-
-## 3. Emission Sequence
-
-The following diagram illustrates the emission order of events across a single turn:
-
-```mermaid
-flowchart TD
-    Start([runTurn Invoked]) --> TurnStarted[turnStarted]
-    TurnStarted --> StepLoop{Step Loop 1..maxSteps}
-
-    StepLoop --> StepStarted[stepStarted]
-    StepStarted --> StreamTokens[tokenDelta / thoughtDelta]
-    StreamTokens --> StreamRetry{Transient Error?}
-
-    StreamRetry -- Yes --> RetryScheduled[retryScheduled]
-    RetryScheduled --> StreamTokens
-
-    StreamRetry -- No --> CheckTools{Model called tools?}
-
-    CheckTools -- No --> ShouldStopHook{onShouldStop?}
-    ShouldStopHook -- stop: false --> StepFinishedNoTools[stepFinished]
-    StepFinishedNoTools --> StepLoop
-    ShouldStopHook -- stop: true --> StepFinishedDone[stepFinished]
-    StepFinishedDone --> TurnFinished[turnFinished]
-
-    CheckTools -- Yes --> ToolProposed[toolCallProposed]
-    ToolProposed --> ToolAuth{onAuthorizeTool}
-    ToolAuth -- Denied --> ToolFinishedDenied[toolExecutionFinished: isError=true]
-    ToolAuth -- Allowed --> ToolStarted[toolExecutionStarted]
-    ToolStarted --> ToolDelta[toolExecutionDelta chunks]
-    ToolDelta --> ToolCheckpoint{File snapshot captured?}
-    ToolCheckpoint -- Yes --> CheckpointCreated[checkpointCreated]
-    ToolCheckpoint -- No --> ToolFinished[toolExecutionFinished]
-    CheckpointCreated --> ToolFinished
-    ToolFinishedDenied --> StepFinished[stepFinished]
-    ToolFinished --> StepFinished
-    StepFinished --> StepLoop
-
-    StepLoop -- maxSteps reached --> TurnFinishedMax[turnFinished: finishReason=maxSteps]
-```
+### 3.4 Errors & Retries
+- **`error`**: Normalizes exceptions into serializable [`ErrorInfo`](../src/events/types.ts) (`name`, `message`, `code`, optional `stack`).
+  - `origin`: `"model" | "tool" | "checkpoint" | "permission" | "hook" | "engine"`.
+  - `isFatal`: Indicates whether the error aborts the turn.
+- **No Outer Retry Events**: Harnex does not emit `retryScheduled` events or duplicate partial streams. HTTP retries are handled natively and transparently by the Vercel AI SDK before streaming commences.

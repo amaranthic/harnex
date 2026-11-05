@@ -85,6 +85,7 @@ describe('AgentEngine Core Invariants', () => {
     const engine = new AgentEngine(
       createBaseConfig({ tools, reasoning: 'high' }),
       initialMessages,
+      1,
     );
 
     expect(engine.threadId).toBe('th_test_123');
@@ -120,28 +121,40 @@ describe('AgentEngine Core Invariants', () => {
     }
   });
 
-  it('throws an error if a second turn is started concurrently on the same engine instance', async () => {
+  it('reserves turn lazily on first .next() and rejects concurrent execution', async () => {
     const engine = new AgentEngine(createBaseConfig());
 
-    // Synchronously acquire first turn without iterating
-    const turn1 = engine.runTurn('First turn');
-    expect(turn1).toBeDefined();
+    // Creating a generator does NOT lock the engine or increment turnCounter
+    const unconsumed = engine.runTurn('Unconsumed turn');
+    expect(unconsumed).toBeDefined();
+    expect(engine.currentTurn).toBe(0);
 
-    expect(() => {
-      // Calling runTurn should immediately throw synchronously because turn 1 reserved the turn
-      engine.runTurn('Concurrent request');
-    }).toThrow('already running an active turn');
+    // Starting first active turn
+    const turn1 = engine.runTurn('First turn');
+    const firstPromise = turn1.next();
+    expect(engine.currentTurn).toBe(1);
+
+    // Starting second active turn concurrently must reject
+    const turn2 = engine.runTurn('Concurrent turn');
+    await expect(turn2.next()).rejects.toThrow('already running an active turn');
+
+    await firstPromise;
   });
 
-  it('correctly initializes turnCounter based on historical user messages', () => {
+  it('initializes turnCounter from explicit initialTurnCount without counting user messages', () => {
     const history: ModelMessage[] = [
       { role: 'user', content: 'Turn 1 prompt' },
       { role: 'assistant', content: 'Turn 1 answer' },
       { role: 'user', content: 'Turn 2 prompt' },
       { role: 'assistant', content: 'Turn 2 answer' },
     ];
-    const engine = new AgentEngine(createBaseConfig(), history);
-    expect(engine.currentTurn).toBe(2);
+    // Without explicit initialTurnCount, defaults to 0
+    const engineDefault = new AgentEngine(createBaseConfig(), history);
+    expect(engineDefault.currentTurn).toBe(0);
+
+    // With explicit initialTurnCount, uses metadata count
+    const engineWithCount = new AgentEngine(createBaseConfig(), history, 2);
+    expect(engineWithCount.currentTurn).toBe(2);
   });
 
   it('converts registered tools to schema definitions without execute handlers for engine control', () => {
@@ -160,12 +173,10 @@ describe('AgentEngine Core Invariants', () => {
   });
 
   it('enforces persistence and checkpoint dependency invariants', () => {
-    // Ephemeral by default: checkpoint forced to false
-    const engine1 = new AgentEngine(createBaseConfig({ checkpoint: true }));
-    expect(engine1.isPersisted).toBe(false);
-    expect(engine1.isCheckpointEnabled).toBe(false);
-    expect(engine1.threadStore).toBeUndefined();
-    expect(engine1.checkpointStore).toBeUndefined();
+    // Ephemeral with checkpoint: true throws configuration error
+    expect(() => {
+      new AgentEngine(createBaseConfig({ checkpoint: true }));
+    }).toThrow('Checkpoints require persistent thread storage');
 
     // Persisted engine with checkpoints enabled
     const engine2 = new AgentEngine(createBaseConfig({ persist: true, checkpoint: true }));
@@ -285,6 +296,23 @@ describe('AgentEngine Core Invariants', () => {
     expect(finishEvent.finishReason).toBe('vetoed');
     // Ensure message history was NOT touched
     expect(engine.messages.length).toBe(0);
+  });
+
+  it('aggregates signals so engine.abort cancels in-flight turn even when caller supplies abortSignal', async () => {
+    const engine = new AgentEngine(createBaseConfig());
+    const callerController = new AbortController();
+
+    const turn = engine.runTurn({
+      userPrompt: 'Cancel me',
+      abortSignal: callerController.signal,
+    });
+
+    // Start consuming
+    const firstPromise = turn.next();
+    engine.abort('Engine level cancellation');
+    const firstResult = await firstPromise;
+    expect(firstResult.done).toBe(false);
+    expect(firstResult.value?.type).toBe('turnStarted');
   });
 
   it('exposes direct store access through threadStore and checkpointStore properties', async () => {

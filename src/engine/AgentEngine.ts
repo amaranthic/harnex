@@ -3,7 +3,8 @@
  * @packageDocumentation
  */
 
-import type { LanguageModel, ModelMessage } from "../model/types.js";
+import type { HernexModelInput, ModelMessage } from "../model/types.js";
+import type { ProviderRegistry } from "../model/ProviderRegistry.js";
 import type { AgentEvent } from "../events/index.js";
 import {
   FileThreadStore,
@@ -42,20 +43,27 @@ export class AgentEngine {
    *
    * @param config - Static engine configuration options.
    * @param initialMessages - Optional previous conversation messages to seed or resume the session.
+   * @param initialTurnCount - Optional initial turn count (e.g. from persisted thread metadata).
    */
   public constructor(
     config: AgentEngineConfig,
     initialMessages?: readonly ModelMessage[],
+    initialTurnCount?: number,
   ) {
     this.conversationMessages = initialMessages ? [...initialMessages] : [];
-    this.turnCounter = this.conversationMessages.filter(
-      (m) => m.role === "user",
-    ).length;
+    this.turnCounter = initialTurnCount ?? 0;
 
     // Evaluate persistence: default is false (ephemeral) unless explicitly set or store provided
     this.isPersistActive = Boolean(config.persist ?? Boolean(config.threadStore));
 
-    // Enforce invariant: checkpoints require persistent thread identity; if persist is false, checkpoint is strictly false
+    // Enforce invariant: checkpoints require persistent thread storage
+    if (config.checkpoint && !this.isPersistActive) {
+      throw new Error(
+        "Checkpoints require persistent thread storage (`persist: true` or `threadStore`). Checkpointing cannot be enabled for ephemeral sessions.",
+      );
+    }
+
+    // Resolve checkpoint active state
     this.isCheckpointActive =
       this.isPersistActive && Boolean(config.checkpoint ?? Boolean(config.checkpointStore));
 
@@ -106,6 +114,9 @@ export class AgentEngine {
       readonly tools: ToolRegistry;
       readonly apiKey: string;
       readonly baseUrl: string;
+      readonly model?: HernexModelInput;
+      readonly providerRegistry?: ProviderRegistry;
+      readonly taskManager?: TaskManager;
       readonly instructions?: string;
       readonly reasoning?: AgentReasoningLevel;
       readonly maxSteps?: number;
@@ -120,15 +131,24 @@ export class AgentEngine {
 
     const messages = await options.threadStore.getMessages(threadId);
 
+    const resolvedModel = options.model ?? metadata.model;
+    if (!resolvedModel) {
+      throw new Error(
+        `Thread "${threadId}" was stored without a model string identifier. An explicit model must be provided in fromThread options.`,
+      );
+    }
+
     return new AgentEngine(
       {
         threadId,
         workingDirectory: metadata.workingDirectory,
-        model: metadata.model ?? "openai/gpt-4o",
+        model: resolvedModel,
         apiKey: options.apiKey,
         baseUrl: options.baseUrl,
         instructions: options.instructions,
         tools: options.tools,
+        providerRegistry: options.providerRegistry,
+        taskManager: options.taskManager,
         reasoning:
           (metadata.reasoning as AgentReasoningLevel) ?? options.reasoning,
         maxSteps: options.maxSteps,
@@ -139,6 +159,7 @@ export class AgentEngine {
         abortSignal: options.abortSignal,
       },
       messages,
+      metadata.turnCount,
     );
   }
 
@@ -152,9 +173,11 @@ export class AgentEngine {
     readonly threadStore: ThreadStore;
     readonly checkpointStore?: CheckpointStore;
     readonly workingDirectory: string;
-    readonly model: string | LanguageModel;
+    readonly model: HernexModelInput;
     readonly apiKey: string;
     readonly baseUrl: string;
+    readonly providerRegistry?: ProviderRegistry;
+    readonly taskManager?: TaskManager;
     readonly title?: string;
     readonly tags?: readonly string[];
     readonly instructions?: string;
@@ -179,6 +202,8 @@ export class AgentEngine {
         model: options.model,
         apiKey: options.apiKey,
         baseUrl: options.baseUrl,
+        providerRegistry: options.providerRegistry,
+        taskManager: options.taskManager,
         instructions: options.instructions,
         tools: options.tools,
         reasoning: options.reasoning,
@@ -190,6 +215,7 @@ export class AgentEngine {
         abortSignal: options.abortSignal,
       },
       [],
+      0,
     );
   }
 
@@ -306,12 +332,28 @@ export class AgentEngine {
   /**
    * Executes a single autonomous agent turn.
    *
+   * Turn reservation occurs lazily when the returned async generator is first consumed.
+   *
    * @param promptOrOptions - User prompt string or full turn execution options.
    * @returns An async generator yielding stream deltas, tool lifecycle, and turn events.
-   * @throws Error if another turn is currently running on this engine instance.
+   * @throws Error if another turn is actively running on this engine instance when iteration begins.
    */
   public runTurn(
     promptOrOptions: string | RunTurnOptions,
+  ): AsyncGenerator<AgentEvent, void, void> {
+    const rawOptions: RunTurnOptions =
+      typeof promptOrOptions === "string"
+        ? { userPrompt: promptOrOptions }
+        : promptOrOptions;
+
+    return this.executeTurn(rawOptions);
+  }
+
+  /**
+   * Internal generator driving turn execution and tracking concurrency state lazily on consumption.
+   */
+  private async *executeTurn(
+    rawOptions: RunTurnOptions,
   ): AsyncGenerator<AgentEvent, void, void> {
     if (this.isTurnRunning) {
       throw new Error(
@@ -323,30 +365,23 @@ export class AgentEngine {
     this.turnCounter++;
     this.currentTurnAbortController = new AbortController();
 
-    const options: RunTurnOptions =
-      typeof promptOrOptions === "string"
-        ? {
-            userPrompt: promptOrOptions,
-            turnIndex: this.turnCounter,
-            abortSignal: this.currentTurnAbortController.signal,
-          }
-        : {
-            ...promptOrOptions,
-            turnIndex: promptOrOptions.turnIndex ?? this.turnCounter,
-            abortSignal:
-              promptOrOptions.abortSignal ??
-              this.currentTurnAbortController.signal,
-          };
+    const turnAbortSignals: AbortSignal[] = [
+      this.currentTurnAbortController.signal,
+    ];
+    if (this.config.abortSignal) {
+      turnAbortSignals.push(this.config.abortSignal);
+    }
+    if (rawOptions.abortSignal) {
+      turnAbortSignals.push(rawOptions.abortSignal);
+    }
+    const combinedSignal = AbortSignal.any(turnAbortSignals);
 
-    return this.executeTurn(options);
-  }
+    const options: RunTurnOptions = {
+      ...rawOptions,
+      turnIndex: rawOptions.turnIndex ?? this.turnCounter,
+      abortSignal: combinedSignal,
+    };
 
-  /**
-   * Internal generator driving turn execution and tracking concurrency state.
-   */
-  private async *executeTurn(
-    options: RunTurnOptions,
-  ): AsyncGenerator<AgentEvent, void, void> {
     try {
       yield* runTurn(this.config, options, this.conversationMessages);
     } finally {

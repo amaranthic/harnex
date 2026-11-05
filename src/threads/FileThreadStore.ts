@@ -403,36 +403,4 @@ export class FileThreadStore implements ThreadStore {
       return messages;
     });
   }
-
-  // [NOTED: Phase 3 Step 4 - engine wrappers cleanup will remove these legacy helper aliases]
-  /**
-   * Legacy alias for updateThread.
-   * @deprecated Use updateThread instead.
-   */
-  public async updateThreadMetadata(
-    threadId: string,
-    patch: UpdateThreadInput,
-  ): Promise<ThreadMetadata> {
-    return this.updateThread(threadId, patch);
-  }
-
-  /**
-   * Legacy alias for getTranscript.
-   * @deprecated Use getTranscript instead.
-   */
-  public async loadTranscript(
-    threadId: string,
-  ): Promise<readonly TranscriptEntry[]> {
-    return this.getTranscript(threadId);
-  }
-
-  /**
-   * Legacy alias for getMessages.
-   * @deprecated Use getMessages instead.
-   */
-  public async loadMessages(
-    threadId: string,
-  ): Promise<readonly ModelMessage[]> {
-    return this.getMessages(threadId);
-  }
 }

@@ -144,4 +144,21 @@ describe("runtimeExecution", () => {
     expect(typeof aiEscapeHatch.streamText).toBe("function");
     expect(typeof aiEscapeHatch.tool).toBe("function");
   });
+
+  it("does not expose internal primitives or obsolete aliases from root entry", async () => {
+    const root = await import("../src/index.js");
+    const rootKeys = Object.keys(root);
+
+    // Internal primitives should not be leaked
+    expect(rootKeys).not.toContain("z");
+    expect(rootKeys).not.toContain("ToolExecutionQueue");
+    expect(rootKeys).not.toContain("atomicWriteFile");
+    expect(rootKeys).not.toContain("resolvePathWithinWorkspace");
+    expect(rootKeys).not.toContain("getSafeBashEnvironment");
+    expect(rootKeys).not.toContain("AsyncEventQueue");
+    expect(rootKeys).not.toContain("runTurn");
+
+    // Obsolete Greg aliases should not exist
+    expect(rootKeys.some((k) => k.startsWith("Greg"))).toBe(false);
+  });
 });

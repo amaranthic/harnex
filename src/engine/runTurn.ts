@@ -3,7 +3,6 @@
  * @packageDocumentation
  */
 
-import { randomUUID } from "node:crypto";
 import { streamText, type HernexStreamTextOptions } from "../runtime.js";
 import type { ModelMessage } from "../model/types.js";
 import type { AgentEvent, JsonValue, ErrorInfo } from "../events/index.js";
@@ -291,30 +290,26 @@ export async function* runTurn(
         parameters: unknown;
       }> = [];
 
-      let responseMessages: ModelMessage[] = [];
-      let rawUsage: any = {};
-
       const streamResult = streamText(streamOptions);
 
       for await (const chunk of streamResult.stream) {
         if (chunk.type === "text-delta") {
           yield {
             type: "tokenDelta",
-            text: (chunk as any).delta ?? (chunk as any).text ?? "",
-            messageId: (chunk as any).id,
+            text: chunk.text,
+            messageId: chunk.id,
           };
         } else if (chunk.type === "reasoning-delta") {
           yield {
             type: "thoughtDelta",
-            text: (chunk as any).delta ?? (chunk as any).text ?? "",
-            messageId: (chunk as any).id,
+            text: chunk.text,
+            messageId: chunk.id,
           };
         } else if (chunk.type === "tool-call") {
-          const rawCall = chunk as any;
           const toolCall = {
-            callId: rawCall.toolCallId ?? rawCall.id ?? randomUUID(),
-            toolName: rawCall.toolName,
-            parameters: rawCall.input ?? rawCall.args ?? {},
+            callId: chunk.toolCallId,
+            toolName: chunk.toolName,
+            parameters: chunk.input,
           };
           proposedToolCalls.push(toolCall);
           yield {
@@ -323,11 +318,24 @@ export async function* runTurn(
             toolName: toolCall.toolName,
             parameters: toJsonValue(toolCall.parameters),
           };
+        } else if (chunk.type === "error") {
+          const streamError =
+            chunk.error instanceof Error
+              ? chunk.error
+              : new Error(String(chunk.error));
+          yield {
+            type: "error",
+            origin: "model",
+            error: toErrorInfo(streamError),
+            isFatal: false,
+          };
         }
       }
 
-      responseMessages = await streamResult.responseMessages;
-      rawUsage = await streamResult.usage;
+      const responseMessages: ModelMessage[] = [
+        ...(await streamResult.responseMessages),
+      ];
+      const rawUsage = await streamResult.usage;
 
       // Collect assistant response messages and step token metrics
       conversationMessages.push(...responseMessages);
@@ -512,7 +520,33 @@ export async function* runTurn(
             }
           } catch (authError) {
             isAllowed = false;
-            denialReason = `Authorization check failed: ${authError instanceof Error ? authError.message : String(authError)}`;
+            const authErrorInstance =
+              authError instanceof Error ? authError : new Error(String(authError));
+            denialReason = `Authorization check failed: ${authErrorInstance.message}`;
+
+            yield {
+              type: "error",
+              origin: "hook",
+              error: toErrorInfo(authErrorInstance),
+              toolName: toolCall.toolName,
+              hookName: "onAuthorizeTool",
+              isFatal: false,
+            };
+
+            if (config.hooks?.onError) {
+              try {
+                await config.hooks.onError({
+                  error: authErrorInstance,
+                  origin: "hook",
+                  toolName: toolCall.toolName,
+                  hookName: "onAuthorizeTool",
+                  turnIndex,
+                  isFatal: false,
+                });
+              } catch {
+                // Do not recursively handle hook errors
+              }
+            }
           }
         }
 
@@ -619,9 +653,10 @@ export async function* runTurn(
         executionResult = await executionPromise;
 
         if (
-          executionResult &&
+          executionResult !== null &&
           typeof executionResult === "object" &&
-          (executionResult as any).isError === true
+          "isError" in executionResult &&
+          (executionResult as { readonly isError?: unknown }).isError === true
         ) {
           isToolError = true;
         }
@@ -664,12 +699,15 @@ export async function* runTurn(
           toolName: tr.toolName,
           output:
             typeof tr.result === "string"
-              ? tr.result
-              : {
+              ? {
                   type: "text",
-                  value: JSON.stringify(tr.result),
+                  value: tr.result,
+                }
+              : {
+                  type: "json",
+                  value: toJsonValue(tr.result),
                 },
-        })) as any,
+        })),
       });
 
       // Emit stepFinished

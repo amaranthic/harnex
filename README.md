@@ -1,24 +1,60 @@
 # @amaranthic/hernex
 
-Execution harness and runtime engine built for Greg and autonomous agent workflows on Vercel AI SDK.
+Harnex is a focused agent execution harness and runtime bridge between application code and the Vercel AI SDK. It provides deterministic multi-step turn loops, fail-closed tool authorization, single-owner process execution, and content-addressed snapshot rollbacks while leaving agent personas, user experience, and high-level goal planning to product code.
 
-## Installation
+---
+
+## Quick Start
 
 ```bash
 bun add @amaranthic/hernex
 ```
 
-## Overview
+```typescript
+import { AgentEngine, ToolRegistry } from "@amaranthic/hernex";
 
-`@amaranthic/hernex` is an execution package built for Greg that users can freely use on their own:
-- **Model Routing**: Single-string provider resolution (`provider/model_id`) with credential isolation.
-- **Agent Microkernel**: Autonomous turn loop with pure serializable events and inward lifecycle hooks.
-- **Tool Harness**: Workspace-confined tools (`readFile`, `writeFile`, `editFile`, `bash`, `glob`, `grep`).
-- **State & Rollback**: Optional thread persistence and content-addressed file delta checkpointing.
+const tools = new ToolRegistry({ includeDefaults: true });
+
+const engine = new AgentEngine({
+  threadId: "session-001",
+  workingDirectory: process.cwd(),
+  model: "anthropic/claude-3-7-sonnet",
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  baseUrl: "https://api.anthropic.com/v1",
+  tools,
+  hooks: {
+    onAuthorizeTool: async () => ({ decision: "allow" }),
+  },
+});
+
+for await (const event of engine.runTurn("Check working directory status")) {
+  if (event.type === "tokenDelta") {
+    process.stdout.write(event.text);
+  }
+}
+```
+
+---
+
+## Key Invariants
+
+1. **Explicit Credentials**: All runtime calls require explicit, non-empty `apiKey` and `baseUrl`. There are no hidden ambient environment variable fallbacks.
+2. **First-Slash Model Parsing**: Models format as `provider/model_id` (e.g. `openrouter/openrouter/free`). Splitting occurs strictly on the first slash only.
+3. **Fail-Closed Authorization**: All tools require explicit authorization via `hooks.onAuthorizeTool`; omission denies execution.
+4. **Host Shell Capability**: `BashTool` runs with the host user's permissions with environment sanitization. It is an authorized host shell capability, not a filesystem sandbox.
+5. **Raw SDK Subpath**: Direct Vercel AI SDK functions and schemas remain accessible via `@amaranthic/hernex/ai`.
+
+---
 
 ## Documentation
 
-Technical specifications are detailed in [`docs/`](docs/):
-- [Agent Engine](docs/agent.md) · [Hooks](docs/hooks.md) · [Events](docs/events.md) · [Tools](docs/tools.md)
+- [Agent Engine & Turn Lifecycle](docs/agent.md)
+- [Outward Streaming Events](docs/events.md)
+- [Inward Interception Hooks](docs/hooks.md)
+- [Tool Registry & Process Tools](docs/tools.md)
 
-## License: MIT
+---
+
+## License
+
+MIT © Amaranthic

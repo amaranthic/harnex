@@ -325,7 +325,9 @@ export class TaskManager {
         if (options?.onOutput) {
           try {
             options.onOutput(restOut);
-          } catch {}
+          } catch {
+            // Live observer errors must not interrupt process output draining
+          }
         }
         appendChunk(restOut);
       }
@@ -335,7 +337,9 @@ export class TaskManager {
         if (options?.onOutput) {
           try {
             options.onOutput(restErr);
-          } catch {}
+          } catch {
+            // Live observer errors must not interrupt process output draining
+          }
         }
         appendChunk(restErr);
       }
@@ -610,7 +614,9 @@ export class TaskManager {
       } catch {
         try {
           record.child.kill(signal);
-        } catch {}
+        } catch {
+          // Process already terminated or signal rejected
+        }
       }
 
       const graceMs = options?.graceMs ?? this.terminationGraceMs;
@@ -624,7 +630,9 @@ export class TaskManager {
           } catch {
             try {
               record.child.kill("SIGKILL");
-            } catch {}
+            } catch {
+              // Process already terminated or signal rejected
+            }
           }
         }
       }, graceMs);
@@ -959,7 +967,9 @@ export class TaskManager {
         if (existsSync(baseTempDir)) {
           rmSync(baseTempDir, { recursive: true, force: true });
         }
-      } catch {}
+      } catch {
+        // Ephemeral task directory cleanup error ignored on shutdown
+      }
     }
 
     this.tasks.clear();
