@@ -1,5 +1,12 @@
 # @amaranthic/hernex
 
+[![npm version](https://img.shields.io/npm/v/@amaranthic/hernex.svg?style=flat-square)](https://www.npmjs.com/package/@amaranthic/hernex)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node-%3E%3D22-brightgreen.svg?style=flat-square)](https://nodejs.org)
+[![Bun](https://img.shields.io/badge/Bun-%3E%3D1.2-black.svg?style=flat-square)](https://bun.sh)
+[![Vercel AI SDK](https://img.shields.io/badge/AI%20SDK-v7-black.svg?style=flat-square)](https://ai-sdk.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue.svg?style=flat-square)](https://www.typescriptlang.org)
+
 Harnex is a focused agent execution harness and runtime bridge between application code and the Vercel AI SDK. It provides deterministic multi-step turn loops, fail-closed tool authorization, single-owner process execution, and content-addressed snapshot rollbacks while leaving agent personas, user experience, and high-level goal planning to product code.
 
 ---
