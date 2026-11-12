@@ -49,9 +49,10 @@ export interface EditFileOutput {
 /**
  * Built-in tool for targeted file editing.
  */
-export class EditFileTool
-  implements AgentTool<typeof editFileInputSchema, EditFileOutput>
-{
+export class EditFileTool implements AgentTool<
+  typeof editFileInputSchema,
+  EditFileOutput
+> {
   public static readonly toolName = "editFile";
 
   public readonly name = EditFileTool.toolName;
@@ -140,7 +141,11 @@ export class EditFileTool
     await atomicWriteFile(fullPath, buffer);
 
     // 3. Post-mutation checkpoint finalization
-    if (context.isCheckpointEnabled && context.checkpointStore && checkpointId) {
+    if (
+      context.isCheckpointEnabled &&
+      context.checkpointStore &&
+      checkpointId
+    ) {
       try {
         const updatedRecord = await context.checkpointStore.updateCheckpoint(
           context.threadId,

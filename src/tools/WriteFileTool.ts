@@ -38,9 +38,10 @@ export interface WriteFileOutput {
 /**
  * Built-in tool for creating or overwriting files.
  */
-export class WriteFileTool
-  implements AgentTool<typeof writeFileInputSchema, WriteFileOutput>
-{
+export class WriteFileTool implements AgentTool<
+  typeof writeFileInputSchema,
+  WriteFileOutput
+> {
   public static readonly toolName = "writeFile";
 
   public readonly name = WriteFileTool.toolName;
@@ -49,7 +50,7 @@ export class WriteFileTool
 
   /**
    * Executes the file writing operation atomically, automatically capturing
-   * a content-addressed checkpoint snapshot if checkpointing is enabled on the session.
+   * a content-addressed checkpoint snapshot if checkpointing is enabled on the thread.
    *
    * @param parameters - Validated parameters containing filePath and content.
    * @param context - The execution context with workingDirectory and checkpoint store.
@@ -95,7 +96,11 @@ export class WriteFileTool
     await atomicWriteFile(fullPath, buffer);
 
     // 3. Post-mutation checkpoint finalization
-    if (context.isCheckpointEnabled && context.checkpointStore && checkpointId) {
+    if (
+      context.isCheckpointEnabled &&
+      context.checkpointStore &&
+      checkpointId
+    ) {
       try {
         const updatedRecord = await context.checkpointStore.updateCheckpoint(
           context.threadId,

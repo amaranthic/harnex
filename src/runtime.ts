@@ -3,10 +3,7 @@
  * @packageDocumentation
  */
 
-import {
-  generateText as aiGenerateText,
-  streamText as aiStreamText,
-} from "ai";
+import { generateText as aiGenerateText, streamText as aiStreamText } from "ai";
 import { resolveModel } from "./model/resolveModel.js";
 import type { ProviderRegistry } from "./model/ProviderRegistry.js";
 import type { HernexModelInput } from "./model/types.js";
@@ -55,7 +52,11 @@ export async function generateText(
 ): ReturnType<typeof aiGenerateText> {
   const { model, apiKey, baseUrl, providerRegistry, ...rest } = options;
 
-  const resolvedModel = resolveModel(model, { apiKey, baseUrl }, providerRegistry);
+  const resolvedModel = resolveModel(
+    model,
+    { apiKey, baseUrl },
+    providerRegistry,
+  );
 
   return aiGenerateText({
     ...rest,
@@ -107,7 +108,11 @@ export function streamText(
 ): ReturnType<typeof aiStreamText> {
   const { model, apiKey, baseUrl, providerRegistry, ...rest } = options;
 
-  const resolvedModel = resolveModel(model, { apiKey, baseUrl }, providerRegistry);
+  const resolvedModel = resolveModel(
+    model,
+    { apiKey, baseUrl },
+    providerRegistry,
+  );
 
   return aiStreamText({
     ...rest,

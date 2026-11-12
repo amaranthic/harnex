@@ -32,7 +32,9 @@ export const bashInputSchema = z.object({
   command: z
     .string()
     .min(1)
-    .describe("The shell command string to execute in the workspace directory."),
+    .describe(
+      "The shell command string to execute in the workspace directory.",
+    ),
   timeoutMs: z
     .number()
     .int()
@@ -181,7 +183,8 @@ export class BashTool implements AgentTool<typeof bashInputSchema, BashOutput> {
     const finalStatus: "running" | "exited" | "killed" | "failed" =
       waitResult.task.status === "orphaned"
         ? "exited"
-        : (waitResult.task.status as "running" | "exited" | "killed" | "failed");
+        : (waitResult.task.status as
+            "running" | "exited" | "killed" | "failed");
 
     return {
       status: finalStatus,

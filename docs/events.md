@@ -37,7 +37,9 @@ for await (const event of engine.runTurn("Refactor src/storage.ts")) {
       break;
 
     case "toolCallProposed":
-      console.log(`\nProposed tool: ${event.toolName} (Call ID: ${event.callId})`);
+      console.log(
+        `\nProposed tool: ${event.toolName} (Call ID: ${event.callId})`,
+      );
       break;
 
     case "toolExecutionStarted":
@@ -54,7 +56,9 @@ for await (const event of engine.runTurn("Refactor src/storage.ts")) {
       break;
 
     case "toolExecutionFinished":
-      console.log(`Tool ${event.toolName} finished in ${event.durationMs}ms (error: ${event.isError})`);
+      console.log(
+        `Tool ${event.toolName} finished in ${event.durationMs}ms (error: ${event.isError})`,
+      );
       break;
 
     case "stepFinished":
@@ -78,16 +82,19 @@ for await (const event of engine.runTurn("Refactor src/storage.ts")) {
 ## 3. Event Types & Schemas
 
 ### 3.1 Turn Lifecycle Events
+
 - **`turnStarted`**: Emitted when turn begins. Fields: `turnIndex`, `userMessage`.
 - **`turnFinished`**: Exactly **one** `turnFinished` event is guaranteed for every started turn (across veto, model completion, tool error, abort, or failure).
   - `finishReason`: `"completed" | "maxSteps" | "interrupted" | "error" | "vetoed" | "lengthExceeded" | "contentFilter"`.
   - `totalUsage`: Cumulative [`StepTokenUsage`](../src/events/stepEvents.ts) across all steps in the turn.
 
 ### 3.2 Model Stream Events
+
 - **`tokenDelta`**: Standard generated text delta chunks. Fields: `text`, optional `messageId`.
 - **`thoughtDelta`**: Reasoning tokens emitted by extended-thinking models. Fields: `text`, optional `messageId`.
 
 ### 3.3 Tool Events
+
 - **`toolCallProposed`**: Emitted when model calls a tool with validated parameters. Fields: `callId`, `toolName`, `parameters` (`JsonValue`).
 - **`toolExecutionStarted`**: Emitted immediately before tool execution begins. Fields: `callId`, `toolName`, `timestamp`.
 - **`toolExecutionDelta`**: Streaming live output chunks from long-running operations. Fields: `callId`, `toolName`, `chunk`.
@@ -95,7 +102,8 @@ for await (const event of engine.runTurn("Refactor src/storage.ts")) {
 - **`checkpointCreated`**: Emitted after file changes are committed to a snapshot. Fields: `checkpointId`, `sequence`, `label`, `filesTouched`.
 
 ### 3.4 Errors & Retries
+
 - **`error`**: Normalizes exceptions into serializable [`ErrorInfo`](../src/events/types.ts) (`name`, `message`, `code`, optional `stack`).
   - `origin`: `"model" | "tool" | "checkpoint" | "permission" | "hook" | "engine"`.
   - `isFatal`: Indicates whether the error aborts the turn.
-- **No Outer Retry Events**: Harnex does not emit `retryScheduled` events or duplicate partial streams. HTTP retries are handled natively and transparently by the Vercel AI SDK before streaming commences.
+- **No Outer Retry Events**: Hernex does not emit `retryScheduled` events or duplicate partial streams. HTTP retries are handled natively and transparently by the Vercel AI SDK before streaming commences.

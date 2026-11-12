@@ -79,15 +79,15 @@ export const grepInputSchema = z.object({
   caseInsensitive: z
     .boolean()
     .optional()
-    .describe("Whether to perform case-insensitive matching. Defaults to false."),
+    .describe(
+      "Whether to perform case-insensitive matching. Defaults to false.",
+    ),
   headLimit: z
     .number()
     .int()
     .positive()
     .optional()
-    .describe(
-      "Maximum number of match entries to return. Defaults to 250.",
-    ),
+    .describe("Maximum number of match entries to return. Defaults to 250."),
 });
 
 /**
@@ -139,12 +139,16 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
     );
 
     if (!existsSync(targetPath)) {
-      throw new Error(`Target path not found: ${parameters.path ?? targetPath}`);
+      throw new Error(
+        `Target path not found: ${parameters.path ?? targetPath}`,
+      );
     }
 
     const targetStats = await lstat(targetPath);
     if (targetStats.isSymbolicLink()) {
-      throw new Error(`Target path is a symbolic link: ${parameters.path ?? targetPath}`);
+      throw new Error(
+        `Target path is a symbolic link: ${parameters.path ?? targetPath}`,
+      );
     }
     const flags = parameters.caseInsensitive ? "i" : "";
     let regex: RegExp;

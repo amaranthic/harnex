@@ -9,12 +9,7 @@
  * Lifecycle execution status of a background shell task.
  */
 export type ShellTaskStatus =
-  | "running"
-  | "stopping"
-  | "exited"
-  | "killed"
-  | "failed"
-  | "orphaned";
+  "running" | "stopping" | "exited" | "killed" | "failed" | "orphaned";
 
 /**
  * Input configuration for creating a managed subprocess task in the engine.
@@ -34,13 +29,13 @@ export interface CreateTaskInput {
  * Options for configuring a TaskManager instance.
  */
 export interface TaskManagerOptions {
-  /** The parent thread identifier associated with this session. */
+  /** The parent thread identifier associated with this task manager. */
   readonly threadId: string;
   /** Root working directory for spawned processes. */
   readonly workingDirectory: string;
   /** Optional base home directory override for storage. */
   readonly homeDirectory?: string | undefined;
-  /** Whether the thread session is persistent (true) or ephemeral (false). Defaults to false. */
+  /** Whether the thread is persistent (true) or ephemeral (false). Defaults to false. */
   readonly persist?: boolean | undefined;
   /** Milliseconds to retain completed tasks before eviction (defaults to 10 minutes). */
   readonly retentionTtlMs?: number | undefined;

@@ -7,10 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import {
-  HernexCheckpointConflictError,
-  HernexStoreError,
-} from "../errors.js";
+import { HernexCheckpointConflictError, HernexStoreError } from "../errors.js";
 import { atomicWriteFile } from "../storage/atomicFile.js";
 import {
   resolveHomeDirectory,
@@ -243,14 +240,17 @@ export class FileCheckpointStore implements CheckpointStore {
   ): Promise<CheckpointRecord> {
     this.validateId(threadId, "thread");
     if (!input.files || input.files.length === 0) {
-      throw new Error("Checkpoint creation requires at least one relative file path.");
+      throw new Error(
+        "Checkpoint creation requires at least one relative file path.",
+      );
     }
 
     const lockPath = this.getLockPath(threadId);
 
     return await withFileLock(lockPath, async () => {
       const list = await this.readManifestUnlocked(threadId);
-      const sequence = list.length > 0 ? list[list.length - 1]!.sequence + 1 : 1;
+      const sequence =
+        list.length > 0 ? list[list.length - 1]!.sequence + 1 : 1;
       const checkpointId = randomUUID();
 
       const fileRecords: CheckpointFileRecord[] = [];

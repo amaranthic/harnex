@@ -1,6 +1,6 @@
 # Tool Registry & Built-In Tools
 
-Harnex provides a structured tool registry and 7 built-in tools for workspace file manipulation, shell command execution, and background process management.
+Hernex provides a structured tool registry and 7 built-in tools for workspace file manipulation, shell command execution, and background process management.
 
 ---
 
@@ -16,7 +16,10 @@ export const weatherSchema = z.object({
   city: z.string().describe("City name to fetch weather for"),
 });
 
-export class WeatherTool implements AgentTool<typeof weatherSchema, { temp: number }> {
+export class WeatherTool implements AgentTool<
+  typeof weatherSchema,
+  { temp: number }
+> {
   public readonly name = "getWeather";
   public readonly description = "Fetches current temperature for a city.";
   public readonly inputSchema = weatherSchema;
@@ -62,7 +65,8 @@ All built-in file tools ([`ReadFileTool`](../src/tools/ReadFileTool.ts), [`Write
 
 ## 4. Shell Execution: `BashTool` & `TaskManager`
 
-Harnex includes two complementary process tools:
+Hernex includes two complementary process tools:
+
 1. **`BashTool` (`bash`)**: Model-facing command executor with automatic background handoff.
 2. **`TaskManagerTool` (`taskManager`)**: Model-facing tool to list, read, send stdin, and stop background tasks.
 
@@ -70,15 +74,18 @@ Both tools share a single process owner: [`TaskManager`](../src/tasks/TaskManage
 
 > [!WARNING]
 > **Bash is NOT a Filesystem Sandbox.**
-> Commands executed by `BashTool` run as the current operating system user with full host permissions. While Harnex sanitizes sensitive environment variables (stripping keys matching `KEY`, `SECRET`, `TOKEN`, `PASSWORD`), it does **not** sandbox host filesystem access. Always enforce policy via `onAuthorizeTool`.
+> Commands executed by `BashTool` run as the current operating system user with full host permissions. While Hernex sanitizes sensitive environment variables (stripping keys matching `KEY`, `SECRET`, `TOKEN`, `PASSWORD`), it does **not** sandbox host filesystem access. Always enforce policy via `onAuthorizeTool`.
 
 ### 4.1 Shell Command Execution (`BashTool`)
+
 - `command` (required): Shell string to execute.
 - `waitMsBeforeAsync` (optional, default: `10000` ms): How long to wait before handing off to a background task (`0` = immediate background).
 - `timeoutMs` (optional): Hard process lifetime; exceeding this stops the process.
 
 ### 4.2 Background Task Management (`TaskManagerTool`)
+
 Supports discriminated actions:
+
 - `action: "list"`: Lists active and completed tasks with runtime, status, exit code, and line count.
 - `action: "read"`: Line-paged file read of task output logs (`offset`, `limit`).
 - `action: "sendInput"`: Sends text to standard input (`input`, optional `newline`).
@@ -90,6 +97,7 @@ Supports discriminated actions:
 ## 5. File Delta Checkpoints
 
 When checkpointing is enabled (`checkpoint: true`), `WriteFileTool` and `EditFileTool` snapshot file changes automatically:
+
 - Pre-mutation state is recorded before writing.
 - Post-mutation state is updated after successful writes.
 - If an uncommitted external modification creates a conflict, `restoreCheckpoint` rejects the rollback cleanly unless `force: true` is passed.

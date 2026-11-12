@@ -15,7 +15,7 @@
  */
 export interface TokenDeltaEvent {
   /** Discriminant event type. */
-  readonly type: 'tokenDelta';
+  readonly type: "tokenDelta";
   /** The streamed textual token slice. */
   readonly text: string;
   /** Optional message identifier associated with the streaming token. */
@@ -34,7 +34,7 @@ export interface TokenDeltaEvent {
  */
 export interface ThoughtDeltaEvent {
   /** Discriminant event type. */
-  readonly type: 'thoughtDelta';
+  readonly type: "thoughtDelta";
   /** The streamed reasoning token slice. */
   readonly text: string;
   /** Optional message identifier associated with the reasoning token. */

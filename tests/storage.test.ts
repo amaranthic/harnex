@@ -3,7 +3,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -100,7 +107,9 @@ describe("storage primitives", () => {
       expect(readFileSync(dest, "utf-8")).toBe("updated content version 2");
 
       const siblingFiles = readdirSync(testDir);
-      const lingeringTemps = siblingFiles.filter((f) => f.startsWith("replace.txt.tmp."));
+      const lingeringTemps = siblingFiles.filter((f) =>
+        f.startsWith("replace.txt.tmp."),
+      );
       expect(lingeringTemps).toHaveLength(0);
     });
 
@@ -118,15 +127,19 @@ describe("storage primitives", () => {
       expect(finalContent).toMatch(/^payload-data-\d+$/);
 
       const siblingFiles = readdirSync(testDir);
-      const lingeringTemps = siblingFiles.filter((f) => f.startsWith("concurrent.txt.tmp."));
+      const lingeringTemps = siblingFiles.filter((f) =>
+        f.startsWith("concurrent.txt.tmp."),
+      );
       expect(lingeringTemps).toHaveLength(0);
     });
 
     it("cleans up sibling temp file on write or rename failure", async () => {
       const dest = path.join(testDir, "cleanup_fail.txt");
-      const renameSpy = spyOn(fsPromises, "rename").mockImplementation(async () => {
-        throw new Error("simulated rename failure");
-      });
+      const renameSpy = spyOn(fsPromises, "rename").mockImplementation(
+        async () => {
+          throw new Error("simulated rename failure");
+        },
+      );
 
       try {
         await expect(atomicWriteFile(dest, "failed content")).rejects.toThrow(
@@ -137,18 +150,24 @@ describe("storage primitives", () => {
       }
 
       const siblingFiles = readdirSync(testDir);
-      const lingeringTemps = siblingFiles.filter((f) => f.startsWith("cleanup_fail.txt.tmp."));
+      const lingeringTemps = siblingFiles.filter((f) =>
+        f.startsWith("cleanup_fail.txt.tmp."),
+      );
       expect(lingeringTemps).toHaveLength(0);
     });
 
     it("combines primary write error and cleanup failure into AggregateError", async () => {
       const dest = path.join(testDir, "aggregate_fail.txt");
-      const renameSpy = spyOn(fsPromises, "rename").mockImplementation(async () => {
-        throw new Error("simulated primary rename error");
-      });
-      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(async () => {
-        throw new Error("simulated cleanup error");
-      });
+      const renameSpy = spyOn(fsPromises, "rename").mockImplementation(
+        async () => {
+          throw new Error("simulated primary rename error");
+        },
+      );
+      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(
+        async () => {
+          throw new Error("simulated cleanup error");
+        },
+      );
 
       try {
         let thrownError: unknown = null;
@@ -161,8 +180,12 @@ describe("storage primitives", () => {
         expect(thrownError).toBeInstanceOf(AggregateError);
         const agg = thrownError as AggregateError;
         expect(agg.errors).toHaveLength(2);
-        expect((agg.errors[0] as Error).message).toBe("simulated primary rename error");
-        expect((agg.errors[1] as Error).message).toBe("simulated cleanup error");
+        expect((agg.errors[0] as Error).message).toBe(
+          "simulated primary rename error",
+        );
+        expect((agg.errors[1] as Error).message).toBe(
+          "simulated cleanup error",
+        );
         expect(agg.message).toContain("Failed to atomically write");
         expect(agg.message).toContain("failed to clean up temporary file");
       } finally {
@@ -231,7 +254,11 @@ describe("storage primitives", () => {
       // Pre-create lock file to simulate an existing active holder
       writeFileSync(
         lockFile,
-        JSON.stringify({ pid: 1234, token: "other_token", createdAt: Date.now() }),
+        JSON.stringify({
+          pid: 1234,
+          token: "other_token",
+          createdAt: Date.now(),
+        }),
       );
 
       let caughtError: unknown = null;
@@ -282,9 +309,11 @@ describe("storage primitives", () => {
 
     it("propagates release failure when the operation succeeds", async () => {
       const lockFile = path.join(testDir, "release_failure.lock");
-      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(async () => {
-        throw new Error("simulated lock unlink failure");
-      });
+      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(
+        async () => {
+          throw new Error("simulated lock unlink failure");
+        },
+      );
 
       try {
         await expect(
@@ -297,9 +326,11 @@ describe("storage primitives", () => {
 
     it("combines operation error and release failure into AggregateError", async () => {
       const lockFile = path.join(testDir, "op_and_release_failure.lock");
-      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(async () => {
-        throw new Error("simulated lock release error");
-      });
+      const unlinkSpy = spyOn(fsPromises, "unlink").mockImplementation(
+        async () => {
+          throw new Error("simulated lock release error");
+        },
+      );
 
       try {
         let caughtError: unknown = null;
@@ -314,9 +345,15 @@ describe("storage primitives", () => {
         expect(caughtError).toBeInstanceOf(AggregateError);
         const agg = caughtError as AggregateError;
         expect(agg.errors).toHaveLength(2);
-        expect((agg.errors[0] as Error).message).toBe("simulated operation error");
-        expect((agg.errors[1] as Error).message).toBe("simulated lock release error");
-        expect(agg.message).toContain("Operation failed and lock release also failed");
+        expect((agg.errors[0] as Error).message).toBe(
+          "simulated operation error",
+        );
+        expect((agg.errors[1] as Error).message).toBe(
+          "simulated lock release error",
+        );
+        expect(agg.message).toContain(
+          "Operation failed and lock release also failed",
+        );
       } finally {
         unlinkSpy.mockRestore();
       }
@@ -344,7 +381,9 @@ describe("storage primitives", () => {
         '{"legacy": true, "name": "first"}\n{"legacy": false, "name": "second"}\n',
       );
 
-      const records = await readJsonl<{ legacy: boolean; name: string }>(jsonlFile);
+      const records = await readJsonl<{ legacy: boolean; name: string }>(
+        jsonlFile,
+      );
       expect(records).toEqual([
         { legacy: true, name: "first" },
         { legacy: false, name: "second" },
@@ -356,9 +395,14 @@ describe("storage primitives", () => {
 
       await appendJsonl(jsonlFile, { id: 100, status: "complete" });
       // Simulate torn write: write an incomplete JSON line without trailing newline
-      writeFileSync(jsonlFile, readFileSync(jsonlFile, "utf-8") + '{"id": 200, "status": "par');
+      writeFileSync(
+        jsonlFile,
+        readFileSync(jsonlFile, "utf-8") + '{"id": 200, "status": "par',
+      );
 
-      const records = await readJsonl<{ id: number; status: string }>(jsonlFile);
+      const records = await readJsonl<{ id: number; status: string }>(
+        jsonlFile,
+      );
       expect(records).toEqual([{ id: 100, status: "complete" }]);
     });
 
@@ -367,7 +411,10 @@ describe("storage primitives", () => {
 
       await appendJsonl(jsonlFile, { id: 1, title: "first" });
       // Append torn incomplete line without trailing newline
-      writeFileSync(jsonlFile, readFileSync(jsonlFile, "utf-8") + '{"id": 2, "broken');
+      writeFileSync(
+        jsonlFile,
+        readFileSync(jsonlFile, "utf-8") + '{"id": 2, "broken',
+      );
 
       // Now append a new valid record; it should repair the torn tail first
       await appendJsonl(jsonlFile, { id: 3, title: "third" });
@@ -383,9 +430,11 @@ describe("storage primitives", () => {
       const jsonlFile = path.join(testDir, "truncate_fail.jsonl");
       writeFileSync(jsonlFile, '{"id": 1}\n{"torn": "incomplete');
 
-      const truncateSpy = spyOn(fsPromises, "truncate").mockImplementation(async () => {
-        throw new Error("simulated truncate I/O error");
-      });
+      const truncateSpy = spyOn(fsPromises, "truncate").mockImplementation(
+        async () => {
+          throw new Error("simulated truncate I/O error");
+        },
+      );
 
       try {
         await expect(readJsonl(jsonlFile)).rejects.toThrow(
@@ -401,10 +450,7 @@ describe("storage primitives", () => {
 
     it("fails closed when middle record is corrupt", async () => {
       const jsonlFile = path.join(testDir, "corrupt_middle.jsonl");
-      writeFileSync(
-        jsonlFile,
-        '{"id": 1}\n{"malformed json line\n{"id": 3}\n',
-      );
+      writeFileSync(jsonlFile, '{"id": 1}\n{"malformed json line\n{"id": 3}\n');
 
       await expect(readJsonl(jsonlFile)).rejects.toThrow(
         /Corrupt JSONL entry at line 2/,
@@ -413,10 +459,7 @@ describe("storage primitives", () => {
 
     it("fails closed when newline-terminated final record is corrupt", async () => {
       const jsonlFile = path.join(testDir, "corrupt_terminated.jsonl");
-      writeFileSync(
-        jsonlFile,
-        '{"id": 1}\n{"corrupt": incomplete}\n',
-      );
+      writeFileSync(jsonlFile, '{"id": 1}\n{"corrupt": incomplete}\n');
 
       await expect(readJsonl(jsonlFile)).rejects.toThrow(
         /Corrupt JSONL entry at line 2/,
@@ -461,7 +504,9 @@ describe("storage primitives", () => {
 
       // Verify Buffer vs Uint8Array distinction
       expect(Buffer.isBuffer(decoded.bufferPayload)).toBe(true);
-      expect(decoded.bufferPayload.toString("utf-8")).toBe("binary buffer payload");
+      expect(decoded.bufferPayload.toString("utf-8")).toBe(
+        "binary buffer payload",
+      );
 
       expect(Buffer.isBuffer(decoded.uint8Payload)).toBe(false);
       expect(decoded.uint8Payload).toBeInstanceOf(Uint8Array);
@@ -479,9 +524,15 @@ describe("storage primitives", () => {
     });
 
     it("rejects functions, symbols, and bigint with TypeError", () => {
-      expect(() => encodeValue(() => {})).toThrow("functions are not serializable");
-      expect(() => encodeValue(Symbol("unsupported"))).toThrow("symbols are not serializable");
-      expect(() => encodeValue(BigInt(12345))).toThrow("bigint is not supported");
+      expect(() => encodeValue(() => {})).toThrow(
+        "functions are not serializable",
+      );
+      expect(() => encodeValue(Symbol("unsupported"))).toThrow(
+        "symbols are not serializable",
+      );
+      expect(() => encodeValue(BigInt(12345))).toThrow(
+        "bigint is not supported",
+      );
     });
 
     it("rejects unsupported prototypes and custom class instances with TypeError", () => {
@@ -490,7 +541,9 @@ describe("storage primitives", () => {
       }
 
       expect(() => encodeValue(new CustomEntity(1))).toThrow(TypeError);
-      expect(() => encodeValue(new CustomEntity(1))).toThrow(/unsupported prototype/);
+      expect(() => encodeValue(new CustomEntity(1))).toThrow(
+        /unsupported prototype/,
+      );
     });
   });
 });

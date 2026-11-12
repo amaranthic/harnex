@@ -30,7 +30,7 @@ import type {
 const THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 /**
- * File-backed ThreadStore implementation managing thread session directories,
+ * File-backed ThreadStore implementation managing thread directories,
  * metadata snapshots, and append-only transcripts.
  */
 export class FileThreadStore implements ThreadStore {
@@ -52,7 +52,11 @@ export class FileThreadStore implements ThreadStore {
    * @throws Error if threadId is empty, invalid, or contains path traversal characters.
    */
   private validateThreadId(threadId: string): void {
-    if (!threadId || typeof threadId !== "string" || !THREAD_ID_PATTERN.test(threadId)) {
+    if (
+      !threadId ||
+      typeof threadId !== "string" ||
+      !THREAD_ID_PATTERN.test(threadId)
+    ) {
       throw new Error(`Invalid thread identifier: "${threadId}"`);
     }
   }
@@ -156,7 +160,7 @@ export class FileThreadStore implements ThreadStore {
   }
 
   /**
-   * Retrieves metadata for an existing thread session under file lock.
+   * Retrieves metadata for an existing thread under file lock.
    *
    * @param threadId - Safe thread identifier.
    * @returns Thread metadata snapshot or undefined if not found.
@@ -205,7 +209,8 @@ export class FileThreadStore implements ThreadStore {
     }
 
     list.sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     );
 
     return options?.limit && options.limit > 0
@@ -238,12 +243,17 @@ export class FileThreadStore implements ThreadStore {
         title: patch.title !== undefined ? patch.title : current.title,
         tags: patch.tags !== undefined ? patch.tags : current.tags,
         model: patch.model !== undefined ? patch.model : current.model,
-        provider: patch.provider !== undefined ? patch.provider : current.provider,
-        reasoning: patch.reasoning !== undefined ? patch.reasoning : current.reasoning,
+        provider:
+          patch.provider !== undefined ? patch.provider : current.provider,
+        reasoning:
+          patch.reasoning !== undefined ? patch.reasoning : current.reasoning,
         updatedAt: new Date().toISOString(),
       };
 
-      const metadataPath = path.join(this.getThreadDir(threadId), "thread.json");
+      const metadataPath = path.join(
+        this.getThreadDir(threadId),
+        "thread.json",
+      );
       await atomicWriteFile(metadataPath, JSON.stringify(updated, null, 2));
       return updated;
     });
@@ -311,7 +321,8 @@ export class FileThreadStore implements ThreadStore {
         if (entry.usage) {
           usage = {
             promptTokens:
-              (current.usage.promptTokens ?? 0) + (entry.usage.promptTokens ?? 0),
+              (current.usage.promptTokens ?? 0) +
+              (entry.usage.promptTokens ?? 0),
             completionTokens:
               (current.usage.completionTokens ?? 0) +
               (entry.usage.completionTokens ?? 0),
@@ -364,7 +375,7 @@ export class FileThreadStore implements ThreadStore {
   }
 
   /**
-   * Reads the full append-only transcript log for a thread session under thread lock.
+   * Reads the full append-only transcript log for a thread under thread lock.
    *
    * @param threadId - Safe thread identifier.
    * @returns Readonly array of sequenced transcript entries.
@@ -385,9 +396,7 @@ export class FileThreadStore implements ThreadStore {
    * @param threadId - Safe thread identifier.
    * @returns Readonly array of ModelMessage items for model invocation.
    */
-  public async getMessages(
-    threadId: string,
-  ): Promise<readonly ModelMessage[]> {
+  public async getMessages(threadId: string): Promise<readonly ModelMessage[]> {
     this.validateThreadId(threadId);
     const lockPath = this.getLockPath(threadId);
     return await withFileLock(lockPath, async () => {

@@ -32,7 +32,8 @@ export function isJsonlEnvelope(value: unknown): value is JsonlEnvelope {
     "value" in value &&
     typeof (value as Record<string, unknown>).value === "object" &&
     (value as Record<string, unknown>).value !== null &&
-    "type" in ((value as Record<string, unknown>).value as Record<string, unknown>)
+    "type" in
+      ((value as Record<string, unknown>).value as Record<string, unknown>)
   );
 }
 
@@ -48,7 +49,10 @@ export function isJsonlEnvelope(value: unknown): value is JsonlEnvelope {
  * @throws {TypeError} If record contains non-serializable values (e.g. functions, cycles).
  * @throws {Error} If torn-tail repair or write fails.
  */
-export async function appendJsonl<T>(filePath: string, record: T): Promise<void> {
+export async function appendJsonl<T>(
+  filePath: string,
+  record: T,
+): Promise<void> {
   const absolutePath = path.resolve(filePath);
   const parentDir = path.dirname(absolutePath);
   if (!existsSync(parentDir)) {

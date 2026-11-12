@@ -31,7 +31,9 @@ export function composeAgentHooks(layers: readonly AgentHooks[]): AgentHooks {
 
   const composed: AgentHooks = {
     onBeforeTurn: activeLayers.some((layer) => layer.onBeforeTurn)
-      ? async (context: BeforeTurnContext): Promise<BeforeTurnResult | void> => {
+      ? async (
+          context: BeforeTurnContext,
+        ): Promise<BeforeTurnResult | void> => {
           let currentPrompt = context.userPrompt;
           const instructionsList: string[] = [];
 
@@ -52,24 +54,37 @@ export function composeAgentHooks(layers: readonly AgentHooks[]): AgentHooks {
               currentPrompt = result.userPrompt;
             }
 
-            if (result.injectedInstructions && result.injectedInstructions.trim().length > 0) {
+            if (
+              result.injectedInstructions &&
+              result.injectedInstructions.trim().length > 0
+            ) {
               instructionsList.push(result.injectedInstructions.trim());
             }
 
             if (result.veto) {
               const res: BeforeTurnResult = {
                 veto: true,
-                ...(result.vetoReason !== undefined ? { vetoReason: result.vetoReason } : {}),
-                ...(currentPrompt !== context.userPrompt ? { userPrompt: currentPrompt } : {}),
-                ...(instructionsList.length > 0 ? { injectedInstructions: instructionsList.join("\n\n") } : {}),
+                ...(result.vetoReason !== undefined
+                  ? { vetoReason: result.vetoReason }
+                  : {}),
+                ...(currentPrompt !== context.userPrompt
+                  ? { userPrompt: currentPrompt }
+                  : {}),
+                ...(instructionsList.length > 0
+                  ? { injectedInstructions: instructionsList.join("\n\n") }
+                  : {}),
               };
               return res;
             }
           }
 
           const finalRes: BeforeTurnResult = {
-            ...(currentPrompt !== context.userPrompt ? { userPrompt: currentPrompt } : {}),
-            ...(instructionsList.length > 0 ? { injectedInstructions: instructionsList.join("\n\n") } : {}),
+            ...(currentPrompt !== context.userPrompt
+              ? { userPrompt: currentPrompt }
+              : {}),
+            ...(instructionsList.length > 0
+              ? { injectedInstructions: instructionsList.join("\n\n") }
+              : {}),
           };
           return finalRes;
         }
@@ -87,7 +102,10 @@ export function composeAgentHooks(layers: readonly AgentHooks[]): AgentHooks {
             const decision = await layer.onShouldStop(context);
             if (!decision.shouldStop) {
               shouldStopAll = false;
-              if (decision.reminderPrompt && decision.reminderPrompt.trim().length > 0) {
+              if (
+                decision.reminderPrompt &&
+                decision.reminderPrompt.trim().length > 0
+              ) {
                 reminderPrompts.push(decision.reminderPrompt.trim());
               }
             }
@@ -116,7 +134,8 @@ export function composeAgentHooks(layers: readonly AgentHooks[]): AgentHooks {
                 return decision;
               }
             } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : String(error);
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
               return {
                 decision: "deny",
                 reason: `Authorization check failed: ${errorMessage}`,

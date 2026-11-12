@@ -13,7 +13,10 @@ import {
   HernexInvalidModelStringError,
   HernexMissingCredentialsError,
 } from "../errors.js";
-import { defaultProviderRegistry, ProviderRegistry } from "./ProviderRegistry.js";
+import {
+  defaultProviderRegistry,
+  ProviderRegistry,
+} from "./ProviderRegistry.js";
 
 /**
  * Parses a Hernex model string according to the strict first-slash rule.
@@ -130,7 +133,8 @@ export function resolveModel(
 
     throw new HernexInvalidModelStringError({
       modelString: String(model),
-      reason: "Model must be a valid 'provider/model_id' string or an instantiated LanguageModel",
+      reason:
+        "Model must be a valid 'provider/model_id' string or an instantiated LanguageModel",
     });
   }
 

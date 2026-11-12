@@ -1,5 +1,5 @@
 /**
- * @fileoverview Thread session, transcript entries, and store contracts.
+ * @fileoverview Threads, transcript entries, and store contracts.
  * @packageDocumentation
  */
 
@@ -7,7 +7,7 @@ import type { StepTokenUsage } from "../events/stepEvents.js";
 import type { ModelMessage } from "../model/types.js";
 
 /**
- * Thread session lifecycle status.
+ * Thread lifecycle status.
  */
 export type ThreadStatus = "idle" | "running" | "error";
 
@@ -42,15 +42,15 @@ export interface ThreadMetadata {
   readonly tags: readonly string[];
   /** Canonical workspace root directory for this thread. */
   readonly workingDirectory: string;
-  /** Model identifier bound to this thread session. */
+  /** Model identifier bound to this thread. */
   readonly model?: string | null | undefined;
-  /** Provider identifier bound to this thread session. */
+  /** Provider identifier bound to this thread. */
   readonly provider?: string | null | undefined;
   /** Optional reasoning effort level. */
   readonly reasoning?: string | null | undefined;
   /** Cumulative count of executed agent turns. */
   readonly turnCount: number;
-  /** Current lifecycle status of the thread session. */
+  /** Current lifecycle status of the thread. */
   readonly status: ThreadStatus;
   /** Highest sequence number written to the append-only transcript. */
   readonly activeTranscriptSequence: number;
@@ -155,7 +155,7 @@ export type NewTranscriptEntry =
     };
 
 /**
- * Parameters for creating a new thread session.
+ * Parameters for creating a new thread.
  */
 export interface CreateThreadInput {
   /** Optional custom safe identifier. If omitted, a random UUID is generated. */
@@ -195,7 +195,7 @@ export interface UpdateThreadInput {
  */
 export interface ThreadStore {
   /**
-   * Creates a new persistent thread session.
+   * Creates a new persistent thread.
    *
    * @param input - Thread creation options including workspace directory.
    * @returns Newly created thread metadata snapshot.
@@ -203,7 +203,7 @@ export interface ThreadStore {
   createThread(input: CreateThreadInput): Promise<ThreadMetadata>;
 
   /**
-   * Retrieves metadata for an existing thread session.
+   * Retrieves metadata for an existing thread.
    *
    * @param threadId - Safe thread identifier.
    * @returns Thread metadata or undefined if not found.
@@ -254,7 +254,7 @@ export interface ThreadStore {
   ): Promise<TranscriptEntry>;
 
   /**
-   * Reads the full append-only transcript log for a thread session.
+   * Reads the full append-only transcript log for a thread.
    *
    * @param threadId - Safe thread identifier.
    * @returns Readonly array of sequenced transcript entries.

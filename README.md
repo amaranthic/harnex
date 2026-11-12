@@ -7,7 +7,7 @@
 [![Vercel AI SDK](https://img.shields.io/badge/AI%20SDK-v7-black.svg?style=flat-square)](https://ai-sdk.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-blue.svg?style=flat-square)](https://www.typescriptlang.org)
 
-Harnex is a focused agent execution harness and runtime bridge between application code and the Vercel AI SDK. It provides deterministic multi-step turn loops, fail-closed tool authorization, single-owner process execution, and content-addressed snapshot rollbacks while leaving agent personas, user experience, and high-level goal planning to product code.
+Hernex is a focused agent execution harness and runtime bridge between application code and the Vercel AI SDK. It provides deterministic multi-step turn loops, fail-closed tool authorization, single-owner process execution, and content-addressed snapshot rollbacks while leaving agent personas, user experience, and high-level goal planning to product code.
 
 ---
 
@@ -23,7 +23,7 @@ import { AgentEngine, ToolRegistry } from "@amaranthic/hernex";
 const tools = new ToolRegistry({ includeDefaults: true });
 
 const engine = new AgentEngine({
-  threadId: "session-001",
+  threadId: "thread-001",
   workingDirectory: process.cwd(),
   model: "anthropic/claude-3-7-sonnet",
   apiKey: process.env.ANTHROPIC_API_KEY!,

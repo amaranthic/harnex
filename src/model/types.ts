@@ -3,12 +3,7 @@
  * @packageDocumentation
  */
 
-import type {
-  LanguageModel,
-  ModelMessage,
-  generateText,
-  streamText,
-} from "ai";
+import type { LanguageModel, ModelMessage, generateText, streamText } from "ai";
 import type { ProviderRegistry } from "./ProviderRegistry.js";
 
 export type { LanguageModel, ModelMessage };
@@ -109,9 +104,13 @@ export type HernexRequest<TNativeParams> = Omit<TNativeParams, "model"> & {
 /**
  * Hernex parameters for `generateText`, derived directly from AI SDK's `generateText` parameters.
  */
-export type HernexGenerateTextParameters = HernexRequest<Parameters<typeof generateText>[0]>;
+export type HernexGenerateTextParameters = HernexRequest<
+  Parameters<typeof generateText>[0]
+>;
 
 /**
  * Hernex parameters for `streamText`, derived directly from AI SDK's `streamText` parameters.
  */
-export type HernexStreamTextParameters = HernexRequest<Parameters<typeof streamText>[0]>;
+export type HernexStreamTextParameters = HernexRequest<
+  Parameters<typeof streamText>[0]
+>;

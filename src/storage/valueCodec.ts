@@ -93,7 +93,11 @@ export function encodeValue(
     }
 
     if (value instanceof Uint8Array) {
-      const buffer = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+      const buffer = Buffer.from(
+        value.buffer,
+        value.byteOffset,
+        value.byteLength,
+      );
       return {
         type: "uint8array",
         base64: buffer.toString("base64"),
@@ -128,7 +132,9 @@ export function encodeValue(
     return { type: "object", entries };
   }
 
-  throw new TypeError(`Cannot encode value: unsupported type "${typeof value}".`);
+  throw new TypeError(
+    `Cannot encode value: unsupported type "${typeof value}".`,
+  );
 }
 
 /**
@@ -160,7 +166,9 @@ export function decodeValue(encoded: EncodedValue): unknown {
       return Buffer.from(encoded.base64, "base64");
     case "uint8array": {
       const buf = Buffer.from(encoded.base64, "base64");
-      return new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      return new Uint8Array(
+        buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+      );
     }
     case "url":
       return new URL(encoded.href);

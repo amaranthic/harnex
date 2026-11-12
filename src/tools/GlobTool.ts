@@ -89,12 +89,16 @@ export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
     );
 
     if (!existsSync(searchDir)) {
-      throw new Error(`Search directory not found: ${parameters.path ?? searchDir}`);
+      throw new Error(
+        `Search directory not found: ${parameters.path ?? searchDir}`,
+      );
     }
 
     const rootStats = await lstat(searchDir);
     if (!rootStats.isDirectory()) {
-      throw new Error(`Search path is not a directory: ${parameters.path ?? searchDir}`);
+      throw new Error(
+        `Search path is not a directory: ${parameters.path ?? searchDir}`,
+      );
     }
 
     const matchedFiles: string[] = [];

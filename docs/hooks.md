@@ -1,6 +1,6 @@
 # Lifecycle Hooks & Authorization
 
-Harnex provides inward interception hooks via [`AgentHooks`](../src/hooks/types.ts). Hooks allow applications to enforce security authorization, modify user prompts, inject dynamic context, evaluate task completion, and observe errors.
+Hernex provides inward interception hooks via [`AgentHooks`](../src/hooks/types.ts). Hooks allow applications to enforce security authorization, modify user prompts, inject dynamic context, evaluate task completion, and observe errors.
 
 ---
 
@@ -9,10 +9,7 @@ Harnex provides inward interception hooks via [`AgentHooks`](../src/hooks/types.
 Hooks are configured on `AgentEngineConfig.hooks`:
 
 ```typescript
-import {
-  type AgentHooks,
-  type PermissionDecision,
-} from "@amaranthic/hernex";
+import { type AgentHooks, type PermissionDecision } from "@amaranthic/hernex";
 
 const hooks: AgentHooks = {
   // Pre-turn modification or veto
@@ -72,7 +69,8 @@ import { composeAgentHooks, type AgentHooks } from "@amaranthic/hernex";
 
 const securityLayer: AgentHooks = {
   onAuthorizeTool: async ({ toolName }) => {
-    if (toolName === "bash") return { decision: "deny", reason: "Disabled by security policy" };
+    if (toolName === "bash")
+      return { decision: "deny", reason: "Disabled by security policy" };
     return { decision: "allow" };
   },
 };
@@ -90,6 +88,7 @@ const composedHooks = composeAgentHooks([securityLayer, loggingLayer]);
 ```
 
 ### Composition Ordering Semantics
+
 1. **`onBeforeTurn`**: Executed in array order. Each hook receives the updated effective prompt. Non-empty injected instructions concatenate with `\n\n`. Any veto immediately short-circuits subsequent hooks and aborts the turn.
 2. **`onShouldStop`**: All layers must return `shouldStop: true` to stop. If any layer returns `shouldStop: false`, execution continues, concatenating reminder prompts in layer order.
 3. **`onAuthorizeTool`**: Every layer must explicitly return `{ decision: "allow" }`. A single deny or thrown error denies execution.

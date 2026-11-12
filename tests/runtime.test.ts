@@ -4,10 +4,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import http from "node:http";
-import {
-  generateText,
-  streamText,
-} from "../src/index.js";
+import { generateText, streamText } from "../src/index.js";
 import * as aiEscapeHatch from "../src/ai.js";
 
 describe("runtimeExecution", () => {
@@ -45,9 +42,7 @@ describe("runtimeExecution", () => {
           res.write(
             `data: ${JSON.stringify({
               id: "stream-chunk-2",
-              choices: [
-                { delta: { content: "text " }, finish_reason: null },
-              ],
+              choices: [{ delta: { content: "text " }, finish_reason: null }],
             })}\n\n`,
           );
           res.write(

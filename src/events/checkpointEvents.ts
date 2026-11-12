@@ -8,7 +8,7 @@
  */
 export interface CheckpointCreatedEvent {
   /** Discriminant event type. */
-  readonly type: 'checkpointCreated';
+  readonly type: "checkpointCreated";
   /** Unique checkpoint identifier. */
   readonly checkpointId: string;
   /** Monotonic sequence number within the thread. */

@@ -42,7 +42,7 @@ export class AgentEngine {
    * Instantiates a new AgentEngine.
    *
    * @param config - Static engine configuration options.
-   * @param initialMessages - Optional previous conversation messages to seed or resume the session.
+   * @param initialMessages - Optional previous conversation messages to seed or resume the thread.
    * @param initialTurnCount - Optional initial turn count (e.g. from persisted thread metadata).
    */
   public constructor(
@@ -54,18 +54,21 @@ export class AgentEngine {
     this.turnCounter = initialTurnCount ?? 0;
 
     // Evaluate persistence: default is false (ephemeral) unless explicitly set or store provided
-    this.isPersistActive = Boolean(config.persist ?? Boolean(config.threadStore));
+    this.isPersistActive = Boolean(
+      config.persist ?? Boolean(config.threadStore),
+    );
 
     // Enforce invariant: checkpoints require persistent thread storage
     if (config.checkpoint && !this.isPersistActive) {
       throw new Error(
-        "Checkpoints require persistent thread storage (`persist: true` or `threadStore`). Checkpointing cannot be enabled for ephemeral sessions.",
+        "Checkpoints require persistent thread storage (`persist: true` or `threadStore`). Checkpointing cannot be enabled for ephemeral threads.",
       );
     }
 
     // Resolve checkpoint active state
     this.isCheckpointActive =
-      this.isPersistActive && Boolean(config.checkpoint ?? Boolean(config.checkpointStore));
+      this.isPersistActive &&
+      Boolean(config.checkpoint ?? Boolean(config.checkpointStore));
 
     // Resolve stores according to persistence flags
     if (this.isPersistActive) {
@@ -220,7 +223,7 @@ export class AgentEngine {
   }
 
   /**
-   * Gets the thread session identifier.
+   * Gets the thread identifier.
    */
   public get threadId(): string {
     return this.config.threadId;
@@ -248,7 +251,7 @@ export class AgentEngine {
   }
 
   /**
-   * Gets the number of completed or executed turns in this session.
+   * Gets the number of completed or executed turns in this thread.
    */
   public get currentTurn(): number {
     return this.turnCounter;
@@ -276,7 +279,7 @@ export class AgentEngine {
   }
 
   /**
-   * Gets the TaskManager instance associated with this engine session.
+   * Gets the TaskManager instance associated with this engine instance.
    */
   public get taskManager(): TaskManager {
     return this.resolvedTaskManager;

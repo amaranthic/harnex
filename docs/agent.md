@@ -1,8 +1,8 @@
 # Agent Engine & Turn Lifecycle
 
-`AgentEngine` is the central execution harness in `@amaranthic/hernex`. It acts as a lightweight bridge between your product and the Vercel AI SDK, managing single-turn execution, tool authorization, signal cancellation, and persistent session storage.
+`AgentEngine` is the central execution harness in `@amaranthic/hernex`. It acts as a lightweight bridge between your product and the Vercel AI SDK, managing single-turn execution, tool authorization, signal cancellation, and persistent thread storage.
 
-Harnex does not dictate product goals, agent personas, or UX workflows. Your application owns the policy; `AgentEngine` owns turn execution.
+Hernex does not dictate product goals, agent personas, or UX workflows. Your application owns the policy; `AgentEngine` owns turn execution.
 
 ---
 
@@ -29,7 +29,7 @@ For stateless or short-lived agent executions, instantiate `AgentEngine` directl
 const tools = new ToolRegistry();
 
 const engine = new AgentEngine({
-  threadId: "th_session_123",
+  threadId: "thread-123",
   workingDirectory: process.cwd(),
   model: "anthropic/claude-3-7-sonnet",
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -44,9 +44,9 @@ const engine = new AgentEngine({
 
 ---
 
-## 3. Persistent Engine Sessions
+## 3. Persistent Engine Threads
 
-Harnex supports durable threads backed by [`FileThreadStore`](../src/threads/FileThreadStore.ts) and content-addressed file delta snapshots backed by [`FileCheckpointStore`](../src/checkpoints/FileCheckpointStore.ts).
+Hernex supports durable threads backed by [`FileThreadStore`](../src/threads/FileThreadStore.ts) and content-addressed file delta snapshots backed by [`FileCheckpointStore`](../src/checkpoints/FileCheckpointStore.ts).
 
 ### 3.1 Creating a New Persistent Thread
 
@@ -63,7 +63,7 @@ const engine = await AgentEngine.create({
   baseUrl: "https://api.openai.com/v1",
   tools,
   checkpoint: true,
-  title: "Refactoring Session",
+  title: "Refactoring Thread",
 });
 
 console.log("Created thread:", engine.threadId);
@@ -90,12 +90,14 @@ console.log("Resumed at turn:", resumedEngine.currentTurn);
 
 ## 4. Consuming Turns (Lazy Async Generator)
 
-Calling `engine.runTurn(...)` returns an `AsyncGenerator<AgentEvent, void, void>`. 
+Calling `engine.runTurn(...)` returns an `AsyncGenerator<AgentEvent, void, void>`.
 
 **Lazy Reservation**: Turn reservation and validation occur on the first `.next()` call (e.g. when entering `for await...of`). A generator created but never consumed does not increment `currentTurn` or lock the engine.
 
 ```typescript
-const turnStream = engine.runTurn("Inspect package.json and summarize dependencies.");
+const turnStream = engine.runTurn(
+  "Inspect package.json and summarize dependencies.",
+);
 
 for await (const event of turnStream) {
   switch (event.type) {
@@ -120,6 +122,7 @@ Simultaneous turns on a single engine instance are strictly forbidden; starting 
 ## 5. Cancellation & Abort Aggregation
 
 `AgentEngine` aggregates abort signals using `AbortSignal.any`:
+
 - The engine's top-level configured signal (`config.abortSignal`).
 - The per-turn signal (`options.abortSignal`).
 - The engine's internal controller triggered by `engine.abort()`.
@@ -137,7 +140,7 @@ setTimeout(() => {
 
 ## 6. Direct Subsystem Access
 
-Harnex does not duplicate store CRUD methods on the engine. Products interact directly with stores and managers exposed via engine getters:
+Hernex does not duplicate store CRUD methods on the engine. Products interact directly with stores and managers exposed via engine getters:
 
 - **`engine.threadStore`**: Access [`ThreadStore`](../src/threads/types.ts) directly (`getThread`, `updateThread`, `getTranscript`, `deleteThread`).
 - **`engine.checkpointStore`**: Access [`CheckpointStore`](../src/checkpoints/types.ts) directly (`listCheckpoints`, `planRestore`, `restoreCheckpoint`, `deleteCheckpoint`).

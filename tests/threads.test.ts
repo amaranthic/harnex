@@ -6,10 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-  FileThreadStore,
-  type StepTokenUsage,
-} from "../src/index.js";
+import { FileThreadStore, type StepTokenUsage } from "../src/index.js";
 import { withFileLock } from "../src/storage/lock.js";
 
 describe("ThreadStore implementations", () => {
@@ -36,14 +33,14 @@ describe("ThreadStore implementations", () => {
       const store = new FileThreadStore({ homeDirectory: testHome });
 
       const thread = await store.createThread({
-        title: "Session Alpha",
+        title: "Thread Alpha",
         tags: ["test", "ai"],
         workingDirectory: "/workspace/alpha",
         model: "openai/gpt-4o",
       });
 
       expect(thread.id).toBeDefined();
-      expect(thread.title).toBe("Session Alpha");
+      expect(thread.title).toBe("Thread Alpha");
       expect(thread.workingDirectory).toBe("/workspace/alpha");
       expect(thread.status).toBe("idle");
       expect(thread.turnCount).toBe(0);
@@ -58,14 +55,14 @@ describe("ThreadStore implementations", () => {
       const fetched = await store.getThread(thread.id);
       expect(fetched).toBeDefined();
       expect(fetched?.id).toBe(thread.id);
-      expect(fetched?.title).toBe("Session Alpha");
+      expect(fetched?.title).toBe("Thread Alpha");
 
       // updateThread
       const updated = await store.updateThread(thread.id, {
-        title: "Session Alpha Updated",
+        title: "Thread Alpha Updated",
         model: "anthropic/claude-3-5-sonnet",
       });
-      expect(updated.title).toBe("Session Alpha Updated");
+      expect(updated.title).toBe("Thread Alpha Updated");
       expect(updated.model).toBe("anthropic/claude-3-5-sonnet");
 
       // listThreads
@@ -139,7 +136,9 @@ describe("ThreadStore implementations", () => {
       let snapshot = await store.getThread(thread.id);
       expect(snapshot?.turnCount).toBe(1);
       expect(snapshot?.status).toBe("running");
-      expect(snapshot?.lastUserPromptPreview).toBe("What is the status of project X?");
+      expect(snapshot?.lastUserPromptPreview).toBe(
+        "What is the status of project X?",
+      );
 
       // 2. Interleaved model messages/reminders do not increment turnCount
       await store.appendTranscript(thread.id, {
@@ -207,12 +206,24 @@ describe("ThreadStore implementations", () => {
       ];
 
       for (const id of unsafeIds) {
-        await expect(store.getThread(id)).rejects.toThrow("Invalid thread identifier");
-        await expect(store.createThread({ id, workingDirectory: "/workspace" })).rejects.toThrow("Invalid thread identifier");
-        await expect(store.updateThread(id, { title: "Test" })).rejects.toThrow("Invalid thread identifier");
-        await expect(store.deleteThread(id)).rejects.toThrow("Invalid thread identifier");
-        await expect(store.getTranscript(id)).rejects.toThrow("Invalid thread identifier");
-        await expect(store.getMessages(id)).rejects.toThrow("Invalid thread identifier");
+        await expect(store.getThread(id)).rejects.toThrow(
+          "Invalid thread identifier",
+        );
+        await expect(
+          store.createThread({ id, workingDirectory: "/workspace" }),
+        ).rejects.toThrow("Invalid thread identifier");
+        await expect(store.updateThread(id, { title: "Test" })).rejects.toThrow(
+          "Invalid thread identifier",
+        );
+        await expect(store.deleteThread(id)).rejects.toThrow(
+          "Invalid thread identifier",
+        );
+        await expect(store.getTranscript(id)).rejects.toThrow(
+          "Invalid thread identifier",
+        );
+        await expect(store.getMessages(id)).rejects.toThrow(
+          "Invalid thread identifier",
+        );
       }
     });
 
@@ -242,8 +253,18 @@ describe("ThreadStore implementations", () => {
         workingDirectory: "/workspace/locktest",
       });
 
-      const lockPath = path.join(testHome, "locks", "threads", `${thread.id}.lock`);
-      const threadInternalLock = path.join(testHome, "threads", thread.id, ".thread.lock");
+      const lockPath = path.join(
+        testHome,
+        "locks",
+        "threads",
+        `${thread.id}.lock`,
+      );
+      const threadInternalLock = path.join(
+        testHome,
+        "threads",
+        thread.id,
+        ".thread.lock",
+      );
 
       // Appending to transcript or updating thread uses the external lock
       await store.updateThread(thread.id, { title: "Updated Title" });

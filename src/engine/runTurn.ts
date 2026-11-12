@@ -276,7 +276,9 @@ export async function* runTurn(
         model: options.model ?? config.model,
         apiKey: options.apiKey ?? config.apiKey,
         baseUrl: options.baseUrl ?? config.baseUrl,
-        ...(config.providerRegistry ? { providerRegistry: config.providerRegistry } : {}),
+        ...(config.providerRegistry
+          ? { providerRegistry: config.providerRegistry }
+          : {}),
         messages: conversationMessages,
         ...(combinedInstructions ? { instructions: combinedInstructions } : {}),
         ...(hasTools ? { tools: sdkToolDefinitions } : {}),
@@ -521,7 +523,9 @@ export async function* runTurn(
           } catch (authError) {
             isAllowed = false;
             const authErrorInstance =
-              authError instanceof Error ? authError : new Error(String(authError));
+              authError instanceof Error
+                ? authError
+                : new Error(String(authError));
             denialReason = `Authorization check failed: ${authErrorInstance.message}`;
 
             yield {
@@ -718,7 +722,10 @@ export async function* runTurn(
       };
     }
 
-    if (finishReason === "completed" && conversationMessages.length > initialHistoryLength) {
+    if (
+      finishReason === "completed" &&
+      conversationMessages.length > initialHistoryLength
+    ) {
       // Check if maxSteps was hit
       const lastMessage = conversationMessages[conversationMessages.length - 1];
       if (lastMessage?.role === "tool") {

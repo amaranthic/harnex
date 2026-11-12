@@ -155,7 +155,12 @@ async function main(): Promise<void> {
   if (process.argv.includes("--smoke")) {
     console.log("Hernex example smoke test mode passed successfully.");
     console.log(`Working Directory: ${process.cwd()}`);
-    console.log(`Registered Tools:  ${tools.list().map((t) => t.name).join(", ")}`);
+    console.log(
+      `Registered Tools:  ${tools
+        .list()
+        .map((t) => t.name)
+        .join(", ")}`,
+    );
     return;
   }
 
@@ -184,14 +189,17 @@ async function main(): Promise<void> {
     hooks: {
       onAuthorizeTool: async (context) => {
         if (context.toolName === "bash") {
-          const rawParams = context.parameters as { command?: unknown } | undefined;
+          const rawParams = context.parameters as
+            { command?: unknown } | undefined;
           const commandStr =
             rawParams && typeof rawParams.command === "string"
               ? rawParams.command
               : JSON.stringify(context.parameters);
 
           console.log(`\n[Security] Shell execution proposed: "${commandStr}"`);
-          const answer = await rl.question("Authorize this bash command? (y/n): ");
+          const answer = await rl.question(
+            "Authorize this bash command? (y/n): ",
+          );
           const normalized = answer.trim().toLowerCase();
 
           if (normalized === "y" || normalized === "yes") {
@@ -209,19 +217,40 @@ async function main(): Promise<void> {
     },
   });
 
-  console.log("╔══════════════════════════════════════════════════════════════════╗");
-  console.log("║               Hernex Agent Core — Interactive Example            ║");
-  console.log("╚══════════════════════════════════════════════════════════════════╝");
+  console.log(
+    "╔══════════════════════════════════════════════════════════════════╗",
+  );
+  console.log(
+    "║               Hernex Agent Core — Interactive Example            ║",
+  );
+  console.log(
+    "╚══════════════════════════════════════════════════════════════════╝",
+  );
   console.log(`Working Directory: ${workingDirectory}`);
-  console.log(`Active Model:      ${activeModel} (Preset 1: ${modelPresets["1"].displayName})`);
+  console.log(
+    `Active Model:      ${activeModel} (Preset 1: ${modelPresets["1"].displayName})`,
+  );
   console.log(`Reasoning Effort:  ${activeReasoningEffort}`);
-  console.log(`Active Tools:      ${tools.list().map((t) => t.name).join(", ")}`);
+  console.log(
+    `Active Tools:      ${tools
+      .list()
+      .map((t) => t.name)
+      .join(", ")}`,
+  );
   console.log("\nQuick Model Switching:");
-  console.log(`  .model 1          - ${modelPresets["1"].displayName} (${modelPresets["1"].modelString}) [Env: ${modelPresets["1"].envVar}]`);
-  console.log(`  .model 2          - ${modelPresets["2"].displayName} (${modelPresets["2"].modelString}) [Env: ${modelPresets["2"].envVar}]`);
-  console.log("  .model <id>       - Custom model string (e.g. .model openai/gpt-4o)");
+  console.log(
+    `  .model 1          - ${modelPresets["1"].displayName} (${modelPresets["1"].modelString}) [Env: ${modelPresets["1"].envVar}]`,
+  );
+  console.log(
+    `  .model 2          - ${modelPresets["2"].displayName} (${modelPresets["2"].modelString}) [Env: ${modelPresets["2"].envVar}]`,
+  );
+  console.log(
+    "  .model <id>       - Custom model string (e.g. .model openai/gpt-4o)",
+  );
   console.log("\nOther Commands:");
-  console.log("  .effort <level>   - Change reasoning effort (none, low, medium, high, max)");
+  console.log(
+    "  .effort <level>   - Change reasoning effort (none, low, medium, high, max)",
+  );
   console.log("  .status           - Display current configuration");
   console.log("  .help             - Display this help message");
   console.log("  .exit / .quit     - Exit terminal session\n");
@@ -247,10 +276,19 @@ async function main(): Promise<void> {
 
       if (trimmed === ".help") {
         console.log("\nCommands:");
-        console.log(`  .model 1          - Switch to ${modelPresets["1"].displayName} (uses ${modelPresets["1"].envVar})`);
-        console.log(`  .model 2          - Switch to ${modelPresets["2"].displayName} (uses ${modelPresets["2"].envVar})`);
-        console.log("  .model <id>       - Switch to custom model (e.g. .model openai/gpt-4o)");
-        console.log("  .effort <level>   - Change effort: " + validReasoningLevels.join(", "));
+        console.log(
+          `  .model 1          - Switch to ${modelPresets["1"].displayName} (uses ${modelPresets["1"].envVar})`,
+        );
+        console.log(
+          `  .model 2          - Switch to ${modelPresets["2"].displayName} (uses ${modelPresets["2"].envVar})`,
+        );
+        console.log(
+          "  .model <id>       - Switch to custom model (e.g. .model openai/gpt-4o)",
+        );
+        console.log(
+          "  .effort <level>   - Change effort: " +
+            validReasoningLevels.join(", "),
+        );
         console.log("  .status           - Show current session settings");
         console.log("  .exit / .quit     - Exit REPL");
         continue;
@@ -260,25 +298,36 @@ async function main(): Promise<void> {
         const creds = resolveCredentialsForModel(activeModel);
         const hasKey = Boolean(creds.apiKey && creds.apiKey.length > 0);
         console.log(`\nModel:            ${activeModel}`);
-        console.log(`API Key Status:   ${hasKey ? "✓ Present" : `✗ Missing (${creds.envVarName ?? "API Key"})`}`);
+        console.log(
+          `API Key Status:   ${hasKey ? "✓ Present" : `✗ Missing (${creds.envVarName ?? "API Key"})`}`,
+        );
         console.log(`Reasoning Effort: ${activeReasoningEffort}`);
         console.log(`Current Turn:     ${engine.currentTurn}`);
         console.log(`Messages Count:   ${engine.messages.length}`);
-        console.log(`Registered Tools: ${tools.list().map((t) => t.name).join(", ")}`);
+        console.log(
+          `Registered Tools: ${tools
+            .list()
+            .map((t) => t.name)
+            .join(", ")}`,
+        );
         continue;
       }
 
       if (trimmed.startsWith(".model")) {
         const parts = trimmed.split(/\s+/);
         if (parts.length < 2 || !parts[1]) {
-          console.log("Usage:\n  .model 1  -> gemini-flash-lite-latest\n  .model 2  -> openrouter/openrouter/free\n  .model <custom>");
+          console.log(
+            "Usage:\n  .model 1  -> gemini-flash-lite-latest\n  .model 2  -> openrouter/openrouter/free\n  .model <custom>",
+          );
           continue;
         }
 
         const choice = parts[1].trim();
         if (choice === "1" || choice === "gemini-flash-lite-latest") {
           activeModel = modelPresets["1"].modelString;
-          console.log(`✓ Active model set to [1]: gemini-flash-lite-latest (${activeModel})`);
+          console.log(
+            `✓ Active model set to [1]: gemini-flash-lite-latest (${activeModel})`,
+          );
           continue;
         }
 
@@ -296,13 +345,18 @@ async function main(): Promise<void> {
       if (trimmed.startsWith(".effort")) {
         const parts = trimmed.split(/\s+/);
         if (parts.length < 2 || !parts[1]) {
-          console.log("Usage: .effort <level>\nAllowed levels: " + validReasoningLevels.join(", "));
+          console.log(
+            "Usage: .effort <level>\nAllowed levels: " +
+              validReasoningLevels.join(", "),
+          );
           continue;
         }
 
         const candidate = parts[1].toLowerCase() as AgentReasoningLevel;
         if (!validReasoningLevels.includes(candidate)) {
-          console.log(`Invalid effort level "${parts[1]}". Allowed: ${validReasoningLevels.join(", ")}`);
+          console.log(
+            `Invalid effort level "${parts[1]}". Allowed: ${validReasoningLevels.join(", ")}`,
+          );
           continue;
         }
 
@@ -320,7 +374,9 @@ async function main(): Promise<void> {
         continue;
       }
 
-      console.log(`\n--- [Turn ${engine.currentTurn + 1} | Model: ${activeModel} | Effort: ${activeReasoningEffort}] ---`);
+      console.log(
+        `\n--- [Turn ${engine.currentTurn + 1} | Model: ${activeModel} | Effort: ${activeReasoningEffort}] ---`,
+      );
 
       try {
         const turnStream = engine.runTurn({
@@ -357,14 +413,18 @@ async function main(): Promise<void> {
               console.log(`\n[Turn Finished: ${event.finishReason}]`);
               break;
             case "error":
-              console.error(`\n[Engine Error: ${event.origin}] ${event.error.message}`);
+              console.error(
+                `\n[Engine Error: ${event.origin}] ${event.error.message}`,
+              );
               break;
             default:
               break;
           }
         }
       } catch (error) {
-        console.error(`\nFailed to complete turn: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(
+          `\nFailed to complete turn: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
   } finally {

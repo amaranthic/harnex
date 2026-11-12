@@ -53,9 +53,7 @@ export interface AfterTurnContext {
 /**
  * Hook invoked after a turn completes.
  */
-export type AfterTurnHook = (
-  context: AfterTurnContext,
-) => Promise<void> | void;
+export type AfterTurnHook = (context: AfterTurnContext) => Promise<void> | void;
 
 /**
  * Context provided when evaluating whether the agent loop should terminate.
@@ -65,7 +63,7 @@ export interface ShouldStopContext {
   readonly turnIndex: number;
   /** Candidate finish reason. */
   readonly finishReason: TurnFinishReason;
-  /** Conversational message snapshot for the current session. */
+  /** Conversational message snapshot for the current thread. */
   readonly transcript?: readonly ModelMessage[] | undefined;
 }
 
@@ -130,9 +128,7 @@ export interface ErrorContext {
 /**
  * Hook invoked when an error occurs during turn execution.
  */
-export type ErrorHook = (
-  context: ErrorContext,
-) => Promise<void> | void;
+export type ErrorHook = (context: ErrorContext) => Promise<void> | void;
 
 /**
  * Composite hooks collection provided by products to customize agent core behavior.

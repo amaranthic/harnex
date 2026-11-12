@@ -37,15 +37,18 @@ Every contribution must preserve Hernex's fundamental design principles:
 ## 📐 Strict Coding & Style Standards
 
 ### 1. Strict Identifier Casing
+
 - **`camelCase`**: Strictly required for all variables, properties, functions, and methods.
 - **`PascalCase`**: Strictly required for all classes, types, interfaces, and enums.
 - **No Other Casing Allowed**: `snake_case` is forbidden in code identifiers across the codebase.
 
 ### 2. Comprehensive JSDoc Documentation
+
 - Every module, exported function, class, interface, type alias, parameter, and return value **must** be documented with rich JSDoc comments (`/** ... */`).
 - Comments must provide clear descriptions, `@param` details, `@returns` explanations, and usage examples where beneficial.
 
 ### 3. Verification Over Assumptions
+
 - Never assume library signatures from memory.
 - Always inspect installed package type declarations directly inside `node_modules/`.
 

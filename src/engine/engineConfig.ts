@@ -6,10 +6,7 @@
 import type { HernexModelInput } from "../model/types.js";
 import type { ProviderRegistry } from "../model/ProviderRegistry.js";
 import type { AgentHooks } from "../hooks/index.js";
-import type {
-  AgentReasoningLevel,
-  ThreadStore,
-} from "../threads/index.js";
+import type { AgentReasoningLevel, ThreadStore } from "../threads/index.js";
 import type { CheckpointStore } from "../checkpoints/index.js";
 import type { TaskManager } from "../tools/index.js";
 import type { ToolRegistry } from "../tools/index.js";
@@ -19,7 +16,7 @@ import type { ToolRegistry } from "../tools/index.js";
  */
 export interface AgentEngineConfig {
   /**
-   * Unique identifier of the conversational thread session.
+   * Unique identifier of the conversational thread.
    */
   readonly threadId: string;
 
@@ -121,7 +118,7 @@ export interface RunTurnOptions {
   readonly userPrompt: string;
 
   /**
-   * One-based sequence index for the active turn within the thread session.
+   * One-based sequence index for the active turn within the thread.
    * Defaults to 1 if not specified.
    */
   readonly turnIndex?: number;

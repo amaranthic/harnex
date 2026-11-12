@@ -3,7 +3,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -60,7 +66,11 @@ describe("FileCheckpointStore", () => {
 
     // 2. Mutate file and update checkpoint
     writeFileSync(absolutePath, "console.log('version 2');");
-    const updated = await store.updateCheckpoint(threadId, cp1.id, workspaceDir);
+    const updated = await store.updateCheckpoint(
+      threadId,
+      cp1.id,
+      workspaceDir,
+    );
     expect(updated.id).toBe(cp1.id);
     expect(updated.files[0]?.afterHash).not.toBe(cp1.files[0]?.beforeHash);
 
@@ -139,7 +149,11 @@ describe("FileCheckpointStore", () => {
     expect(plan.actions[0]?.action).toBe("modify");
 
     // Perform restore
-    const result = await store.restoreCheckpoint(threadId, checkpoint.id, workspaceDir);
+    const result = await store.restoreCheckpoint(
+      threadId,
+      checkpoint.id,
+      workspaceDir,
+    );
     expect(result.filesRestored).toBe(1);
     expect(result.conflictsOverwritten).toBe(0);
     expect(readFileSync(absolutePath, "utf-8")).toBe('{"version": 1}');
@@ -182,7 +196,9 @@ describe("FileCheckpointStore", () => {
     );
     expect(forcedResult.conflictsOverwritten).toBe(1);
     expect(forcedResult.filesRestored).toBe(1);
-    expect(readFileSync(absolutePath, "utf-8")).toBe("export const port = 3000;");
+    expect(readFileSync(absolutePath, "utf-8")).toBe(
+      "export const port = 3000;",
+    );
   });
 
   it("rejects path traversal in manifest and input file paths", async () => {
@@ -229,7 +245,9 @@ describe("FileCheckpointStore", () => {
       JSON.stringify([{ id: "cp_old", sequence: 1 }]),
     );
 
-    await expect(store.listCheckpoints(threadId)).rejects.toThrow(HernexStoreError);
+    await expect(store.listCheckpoints(threadId)).rejects.toThrow(
+      HernexStoreError,
+    );
   });
 
   it("preserves shared blobs when deleting one of multiple checkpoints", async () => {
@@ -263,7 +281,11 @@ describe("FileCheckpointStore", () => {
     await store.deleteCheckpoint(threadId, cp1.id);
 
     // cp2 should still restore successfully using the shared blob
-    const restoreRes = await store.restoreCheckpoint(threadId, cp2.id, workspaceDir);
+    const restoreRes = await store.restoreCheckpoint(
+      threadId,
+      cp2.id,
+      workspaceDir,
+    );
     expect(restoreRes.filesRestored).toBe(1);
     expect(readFileSync(path.join(workspaceDir, file2), "utf-8")).toBe(content);
   });

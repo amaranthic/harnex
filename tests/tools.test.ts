@@ -139,7 +139,10 @@ describe("Built-in File & Shell Tools", () => {
   let testWorkspace: string;
 
   beforeEach(() => {
-    testWorkspace = join(tmpdir(), `greg-agent-test-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    testWorkspace = join(
+      tmpdir(),
+      `greg-agent-test-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    );
     mkdirSync(testWorkspace, { recursive: true });
   });
 
@@ -162,7 +165,9 @@ describe("Built-in File & Shell Tools", () => {
     };
 
     // 1. Write file
-    const content = ["line 1", "line 2", "line 3", "line 4", "line 5"].join("\n");
+    const content = ["line 1", "line 2", "line 3", "line 4", "line 5"].join(
+      "\n",
+    );
     const writeResult = await writeTool.execute(
       { filePath: "sub/test.txt", content },
       writeContext,
@@ -249,12 +254,18 @@ describe("Built-in File & Shell Tools", () => {
   });
 
   it("integrates checkpoint lifecycle with WriteFileTool and EditFileTool allowing clean rollback", async () => {
-    const checkpointStore = new FileCheckpointStore({ homeDirectory: testWorkspace });
+    const checkpointStore = new FileCheckpointStore({
+      homeDirectory: testWorkspace,
+    });
     const writeTool = new WriteFileTool();
     const editTool = new EditFileTool();
 
     let lastCreatedEvent:
-      | { readonly checkpointId: string; readonly sequence: number; readonly label: string }
+      | {
+          readonly checkpointId: string;
+          readonly sequence: number;
+          readonly label: string;
+        }
       | undefined;
 
     const context = {
@@ -273,7 +284,10 @@ describe("Built-in File & Shell Tools", () => {
     };
 
     // 1. Create a new file via WriteFileTool
-    await writeTool.execute({ filePath: "doc.txt", content: "initial content" }, context);
+    await writeTool.execute(
+      { filePath: "doc.txt", content: "initial content" },
+      context,
+    );
     expect(lastCreatedEvent).toBeDefined();
     expect(lastCreatedEvent?.label).toBe("writeFile: doc.txt");
 
@@ -295,7 +309,9 @@ describe("Built-in File & Shell Tools", () => {
       testWorkspace,
     );
     expect(restoreResult.filesRestored).toBe(1);
-    expect(readFileSync(join(testWorkspace, "doc.txt"), "utf-8")).toBe("initial content");
+    expect(readFileSync(join(testWorkspace, "doc.txt"), "utf-8")).toBe(
+      "initial content",
+    );
 
     // 4. Rollback the first checkpoint (where file was absent before) to delete it
     const restoreFirst = await checkpointStore.restoreCheckpoint(
@@ -339,10 +355,16 @@ describe("Built-in File & Shell Tools", () => {
 
   it("executes GlobTool and GrepTool across files", async () => {
     // Setup directory structure
-    writeFileSync(join(testWorkspace, "fileA.ts"), "export const ALPHA = 42;\n");
+    writeFileSync(
+      join(testWorkspace, "fileA.ts"),
+      "export const ALPHA = 42;\n",
+    );
     writeFileSync(join(testWorkspace, "fileB.ts"), "export const BETA = 99;\n");
     mkdirSync(join(testWorkspace, "node_modules"), { recursive: true });
-    writeFileSync(join(testWorkspace, "node_modules", "ignored.ts"), "export const ALPHA = 1;\n");
+    writeFileSync(
+      join(testWorkspace, "node_modules", "ignored.ts"),
+      "export const ALPHA = 1;\n",
+    );
 
     const globTool = new GlobTool();
     const grepTool = new GrepTool();
@@ -406,7 +428,10 @@ describe("Built-in File & Shell Tools", () => {
       context,
     );
 
-    const readRes = await readTool.execute({ filePath: "literal.txt" }, context);
+    const readRes = await readTool.execute(
+      { filePath: "literal.txt" },
+      context,
+    );
     expect(readRes.content).toContain("price is $100");
     expect(readRes.content).toContain("code is $& and $$");
   });
@@ -437,19 +462,30 @@ describe("Built-in File & Shell Tools", () => {
 
     // 1. Root equality
     expect(resolvePathWithinWorkspace(".", testWorkspace)).toBe(canonicalWs);
-    expect(resolvePathWithinWorkspace(testWorkspace, testWorkspace)).toBe(canonicalWs);
+    expect(resolvePathWithinWorkspace(testWorkspace, testWorkspace)).toBe(
+      canonicalWs,
+    );
 
     // 2. Traversal rejection
-    expect(() => resolvePathWithinWorkspace("..", testWorkspace)).toThrow("resolves outside");
-    expect(() => resolvePathWithinWorkspace("../outside.txt", testWorkspace)).toThrow("resolves outside");
-    expect(() => resolvePathWithinWorkspace("/etc/passwd", testWorkspace)).toThrow("resolves outside");
+    expect(() => resolvePathWithinWorkspace("..", testWorkspace)).toThrow(
+      "resolves outside",
+    );
+    expect(() =>
+      resolvePathWithinWorkspace("../outside.txt", testWorkspace),
+    ).toThrow("resolves outside");
+    expect(() =>
+      resolvePathWithinWorkspace("/etc/passwd", testWorkspace),
+    ).toThrow("resolves outside");
 
     // 3. Dot-dot prefixed filename inside workspace (..notes)
     const notesPath = resolvePathWithinWorkspace("..notes", testWorkspace);
     expect(notesPath).toBe(join(canonicalWs, "..notes"));
 
     // 4. Missing leaf in existing directory is allowed (for creating new files)
-    const newFilePath = resolvePathWithinWorkspace("nested_missing/file.txt", testWorkspace);
+    const newFilePath = resolvePathWithinWorkspace(
+      "nested_missing/file.txt",
+      testWorkspace,
+    );
     expect(newFilePath).toBe(join(canonicalWs, "nested_missing/file.txt"));
 
     // 5. Final symlink component rejection
@@ -458,12 +494,12 @@ describe("Built-in File & Shell Tools", () => {
     const symlinkFile = join(testWorkspace, "link_file.txt");
     symlinkSync(targetReal, symlinkFile);
 
-    expect(() => resolvePathWithinWorkspace("link_file.txt", testWorkspace)).toThrow(
-      "contains symbolic link",
-    );
+    expect(() =>
+      resolvePathWithinWorkspace("link_file.txt", testWorkspace),
+    ).toThrow("contains symbolic link");
 
     // 6. Symlink parent directory with missing child rejection (no bypass on missing leaf)
-    const outsideDir = join(tmpdir(), `harnex_outside_${Date.now()}`);
+    const outsideDir = join(tmpdir(), `hernex_outside_${Date.now()}`);
     mkdirSync(outsideDir, { recursive: true });
     const symlinkDir = join(testWorkspace, "link_dir");
     symlinkSync(outsideDir, symlinkDir, "dir");
@@ -488,7 +524,7 @@ describe("Built-in File & Shell Tools", () => {
   });
 
   it("verifies read, write, edit, glob, and grep cannot traverse workspace symlinks pointing outside", async () => {
-    const outsideDir = join(tmpdir(), `harnex_outside_tools_${Date.now()}`);
+    const outsideDir = join(tmpdir(), `hernex_outside_tools_${Date.now()}`);
     mkdirSync(outsideDir, { recursive: true });
     const outsideFile = join(outsideDir, "outside_secret.txt");
     writeFileSync(outsideFile, "SECRET_PASS=top_secret_token\n", "utf8");
@@ -670,7 +706,7 @@ describe("Built-in File & Shell Tools", () => {
 
       const bashRes = await bashTool.execute(
         {
-          command: 'node -e "setTimeout(() => console.log(\'done\'), 500)"',
+          command: "node -e \"setTimeout(() => console.log('done'), 500)\"",
           waitMsBeforeAsync: 0,
         },
         context,
@@ -708,7 +744,7 @@ describe("Built-in File & Shell Tools", () => {
 
       const bashRes = await bashTool.execute(
         {
-          command: 'node -e "setTimeout(() => console.log(\'later\'), 400)"',
+          command: "node -e \"setTimeout(() => console.log('later'), 400)\"",
           waitMsBeforeAsync: 50,
         },
         context,
@@ -737,7 +773,7 @@ describe("Built-in File & Shell Tools", () => {
 
       // Generate 10 distinct lines in a script
       const script =
-        'node -e "for(let i=1;i<=10;i++) console.log(\'line_\' + i);"';
+        "node -e \"for(let i=1;i<=10;i++) console.log('line_' + i);\"";
       const bashRes = await bashTool.execute(
         { command: script, waitMsBeforeAsync: 0 },
         context,
@@ -816,7 +852,7 @@ describe("Built-in File & Shell Tools", () => {
 
       // Spawns a process waiting for readline input
       const script =
-        'node -e "const readline = require(\'readline\'); const rl = readline.createInterface({ input: process.stdin }); rl.on(\'line\', (l) => { process.stdout.write(\'ECHO:\' + l + \'\\n\', () => process.exit(0)); });"';
+        "node -e \"const readline = require('readline'); const rl = readline.createInterface({ input: process.stdin }); rl.on('line', (l) => { process.stdout.write('ECHO:' + l + '\\n', () => process.exit(0)); });\"";
 
       const bashRes = await bashTool.execute(
         { command: script, waitMsBeforeAsync: 0 },
@@ -845,9 +881,9 @@ describe("Built-in File & Shell Tools", () => {
         context,
       );
       if (readRes.action === "read") {
-        expect(readRes.lines.some((l) => l.includes("ECHO:secretPayload"))).toBe(
-          true,
-        );
+        expect(
+          readRes.lines.some((l) => l.includes("ECHO:secretPayload")),
+        ).toBe(true);
       }
 
       await taskManager.shutdown();
@@ -870,7 +906,7 @@ describe("Built-in File & Shell Tools", () => {
 
       const bashRes = await bashTool.execute(
         {
-          command: 'node -e "setInterval(() => console.log(\'alive\'), 100)"',
+          command: "node -e \"setInterval(() => console.log('alive'), 100)\"",
           waitMsBeforeAsync: 0,
         },
         context,
@@ -899,7 +935,7 @@ describe("Built-in File & Shell Tools", () => {
       });
 
       const task = await taskManager.createTask({
-        command: 'node -e "setInterval(() => console.log(\'tick\'), 100)"',
+        command: "node -e \"setInterval(() => console.log('tick'), 100)\"",
       });
 
       expect(task.id).toBeDefined();
@@ -942,10 +978,12 @@ describe("Built-in File & Shell Tools", () => {
       });
 
       const script =
-        'node -e "for(let i=0; i<30; i++) console.log(\'output_line_payload_\' + i);"';
+        "node -e \"for(let i=0; i<30; i++) console.log('output_line_payload_' + i);\"";
       const task = await taskManager.createTask({ command: script });
 
-      const waitRes = await taskManager.waitForTask(task.id, { timeoutMs: 3000 });
+      const waitRes = await taskManager.waitForTask(task.id, {
+        timeoutMs: 3000,
+      });
       expect(waitRes.timedOut).toBe(false);
       expect(waitRes.task.outputTruncated).toBe(true);
       expect(waitRes.task.outputBytes).toBeGreaterThan(120);
@@ -971,7 +1009,7 @@ describe("Built-in File & Shell Tools", () => {
       };
 
       const task = await taskManager.createTask({
-        command: 'node -e "console.log(\'hello\');"',
+        command: "node -e \"console.log('hello');\"",
       });
       await taskManager.waitForTask(task.id, { timeoutMs: 2000 });
 

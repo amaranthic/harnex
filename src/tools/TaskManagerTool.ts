@@ -48,8 +48,12 @@ export const taskManagerInputSchema = z.discriminatedUnion("action", [
   z.object({
     action: z
       .literal("sendInput")
-      .describe("Deliver text into standard input of a running background task."),
-    taskId: z.string().describe("The unique task identifier of the target process."),
+      .describe(
+        "Deliver text into standard input of a running background task.",
+      ),
+    taskId: z
+      .string()
+      .describe("The unique task identifier of the target process."),
     input: z.string().describe("Text payload to write into stdin."),
     newline: z
       .boolean()
@@ -106,9 +110,10 @@ export type TaskManagerOutput =
 /**
  * Built-in tool for managing background shell tasks.
  */
-export class TaskManagerTool
-  implements AgentTool<typeof taskManagerInputSchema, TaskManagerOutput>
-{
+export class TaskManagerTool implements AgentTool<
+  typeof taskManagerInputSchema,
+  TaskManagerOutput
+> {
   public static readonly toolName = "taskManager";
 
   public readonly name = TaskManagerTool.toolName;
@@ -121,7 +126,7 @@ export class TaskManagerTool
    * @param parameters - Discriminated union of task management parameters (list, read, sendInput, stop, delete).
    * @param context - The execution context containing taskManager.
    * @returns The action-specific execution output.
-   * @throws Error if taskManager is not configured in the session.
+   * @throws Error if taskManager is not configured in the execution context.
    */
   public async execute(
     parameters: TaskManagerInput,
@@ -130,7 +135,7 @@ export class TaskManagerTool
     const taskManager = context.taskManager;
     if (!taskManager) {
       throw new Error(
-        "TaskManager is not active in this session. Background task management requires TaskManager to be configured.",
+        "TaskManager is not active in this execution context. Background task management requires TaskManager to be configured.",
       );
     }
 

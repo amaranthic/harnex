@@ -39,7 +39,9 @@ describe("modelParsing", () => {
   });
 
   it("should throw HernexInvalidModelStringError when no slash is present", () => {
-    expect(() => parseModelString("gpt-4o")).toThrow(HernexInvalidModelStringError);
+    expect(() => parseModelString("gpt-4o")).toThrow(
+      HernexInvalidModelStringError,
+    );
 
     try {
       parseModelString("gpt-4o");
@@ -53,20 +55,26 @@ describe("modelParsing", () => {
   });
 
   it("should throw HernexInvalidModelStringError when provider segment is empty", () => {
-    expect(() => parseModelString("/gpt-4o")).toThrow(HernexInvalidModelStringError);
+    expect(() => parseModelString("/gpt-4o")).toThrow(
+      HernexInvalidModelStringError,
+    );
 
     try {
       parseModelString("/gpt-4o");
     } catch (error) {
       expect(HernexInvalidModelStringError.isInstance(error)).toBe(true);
       if (HernexInvalidModelStringError.isInstance(error)) {
-        expect(error.message).toContain("Provider identifier before '/' is empty");
+        expect(error.message).toContain(
+          "Provider identifier before '/' is empty",
+        );
       }
     }
   });
 
   it("should throw HernexInvalidModelStringError when modelId segment is empty", () => {
-    expect(() => parseModelString("openai/")).toThrow(HernexInvalidModelStringError);
+    expect(() => parseModelString("openai/")).toThrow(
+      HernexInvalidModelStringError,
+    );
 
     try {
       parseModelString("openai/");
@@ -80,7 +88,9 @@ describe("modelParsing", () => {
 
   it("should throw HernexInvalidModelStringError when given non-string input", () => {
     // @ts-expect-error Testing non-string input
-    expect(() => parseModelString(12345)).toThrow(HernexInvalidModelStringError);
+    expect(() => parseModelString(12345)).toThrow(
+      HernexInvalidModelStringError,
+    );
   });
 });
 
@@ -99,9 +109,9 @@ describe("credentialsValidation", () => {
 
   it("should throw HernexMissingCredentialsError when apiKey is missing or null", () => {
     // @ts-expect-error Testing missing apiKey
-    expect(() => validateCredentials({ baseUrl: "https://api.openai.com/v1" }, "openai")).toThrow(
-      HernexMissingCredentialsError,
-    );
+    expect(() =>
+      validateCredentials({ baseUrl: "https://api.openai.com/v1" }, "openai"),
+    ).toThrow(HernexMissingCredentialsError);
 
     try {
       // @ts-expect-error Testing missing apiKey
@@ -129,9 +139,9 @@ describe("credentialsValidation", () => {
 
   it("should throw HernexMissingCredentialsError when baseUrl is missing", () => {
     // @ts-expect-error Testing missing baseUrl
-    expect(() => validateCredentials({ apiKey: "sk-valid-key" }, "anthropic")).toThrow(
-      HernexMissingCredentialsError,
-    );
+    expect(() =>
+      validateCredentials({ apiKey: "sk-valid-key" }, "anthropic"),
+    ).toThrow(HernexMissingCredentialsError);
 
     try {
       // @ts-expect-error Testing missing baseUrl
@@ -158,7 +168,11 @@ describe("credentialsValidation", () => {
   });
 
   it("requires valid credentials for LanguageModel object inputs in resolveModel", () => {
-    const mockModel = { specificationVersion: "v1", provider: "mock", modelId: "test" } as any;
+    const mockModel = {
+      specificationVersion: "v1",
+      provider: "mock",
+      modelId: "test",
+    } as any;
 
     expect(() =>
       resolveModel(mockModel, { apiKey: "", baseUrl: "https://mock.com" }),
@@ -183,9 +197,7 @@ describe("ProviderRegistry Isolation & Management", () => {
     };
 
     registry.register(adapter);
-    expect(() => registry.register(adapter)).toThrow(
-      /already registered/,
-    );
+    expect(() => registry.register(adapter)).toThrow(/already registered/);
   });
 
   it("unregisters and lists registered providers accurately", () => {

@@ -13,7 +13,7 @@ import type { TaskManager } from "../tasks/TaskManager.js";
  */
 export interface ToolExecutionContext {
   /**
-   * The unique identifier of the active thread session.
+   * The unique identifier of the active thread.
    */
   readonly threadId: string;
 
@@ -43,7 +43,7 @@ export interface ToolExecutionContext {
   readonly checkpointStore?: CheckpointStore | undefined;
 
   /**
-   * Whether checkpointing is actively enabled for this thread session.
+   * Whether checkpointing is actively enabled for this thread.
    */
   readonly isCheckpointEnabled?: boolean | undefined;
 

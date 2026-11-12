@@ -35,7 +35,7 @@ export type TurnFinishReason =
 export interface TurnStartedEvent {
   /** Discriminant event type. */
   readonly type: "turnStarted";
-  /** One-based index of the active turn within the thread session. */
+  /** One-based index of the active turn within the thread. */
   readonly turnIndex: number;
   /** The user prompt that initiated the turn. */
   readonly userMessage: string;

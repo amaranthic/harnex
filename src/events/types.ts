@@ -48,12 +48,7 @@ export interface ErrorInfo {
  * Origin subsystem where an error or failure originated.
  */
 export type ErrorOrigin =
-  | "model"
-  | "tool"
-  | "checkpoint"
-  | "permission"
-  | "hook"
-  | "engine";
+  "model" | "tool" | "checkpoint" | "permission" | "hook" | "engine";
 
 /**
  * Discriminated union of all outward streaming events emitted by the AgentEngine turn stream.

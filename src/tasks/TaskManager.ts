@@ -154,7 +154,7 @@ export class TaskManager {
 
   /**
    * Spawns and registers a new shell process as a managed task.
-   * This is the sole execution owner for subprocess spawning across Harnex.
+   * This is the sole execution owner for subprocess spawning across Hernex.
    *
    * @param input - Process parameters including command string, cwd, timeout, and environment allowlist.
    * @param options - Optional observers such as streaming onOutput callback.
@@ -168,7 +168,11 @@ export class TaskManager {
     if (this.isDisposed) {
       throw new Error("Cannot create task: TaskManager has been shut down.");
     }
-    if (!input.command || typeof input.command !== "string" || input.command.trim().length === 0) {
+    if (
+      !input.command ||
+      typeof input.command !== "string" ||
+      input.command.trim().length === 0
+    ) {
       throw new Error("Command must be a non-empty string.");
     }
 
@@ -241,7 +245,8 @@ export class TaskManager {
       record.pendingBuffer += text;
       const hasTrailingNewline = text.endsWith("\n");
       const currentTotalLines =
-        record.newlineCount + (hasTrailingNewline || record.pendingBuffer.length === 0 ? 0 : 1);
+        record.newlineCount +
+        (hasTrailingNewline || record.pendingBuffer.length === 0 ? 0 : 1);
 
       record.metadata = {
         ...record.metadata,
@@ -254,7 +259,9 @@ export class TaskManager {
           appendFileSync(logPath, text, "utf-8");
           record.persistedBytes += chunkBytes;
         } else {
-          const slice = Buffer.from(text, "utf-8").subarray(0, available).toString("utf-8");
+          const slice = Buffer.from(text, "utf-8")
+            .subarray(0, available)
+            .toString("utf-8");
           if (slice.length > 0) {
             appendFileSync(logPath, slice, "utf-8");
             record.persistedBytes += Buffer.byteLength(slice, "utf-8");
@@ -377,7 +384,9 @@ export class TaskManager {
       record.terminalTimestamp = endedAt;
 
       const metaPath = path.join(taskDir, "meta.json");
-      atomicWriteFile(metaPath, JSON.stringify(record.metadata, null, 2)).catch(() => {});
+      atomicWriteFile(metaPath, JSON.stringify(record.metadata, null, 2)).catch(
+        () => {},
+      );
 
       for (const waiter of record.waiters) {
         waiter(record.metadata);
@@ -891,8 +900,7 @@ export class TaskManager {
           r.metadata.status !== "running" && r.metadata.status !== "stopping",
       )
       .sort(
-        (a, b) =>
-          (a[1].terminalTimestamp ?? 0) - (b[1].terminalTimestamp ?? 0),
+        (a, b) => (a[1].terminalTimestamp ?? 0) - (b[1].terminalTimestamp ?? 0),
       );
 
     while (remaining.length > this.maxRetainedTasks) {

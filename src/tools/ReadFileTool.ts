@@ -94,9 +94,10 @@ export interface ReadFileOutput {
 /**
  * Built-in tool for inspecting file contents.
  */
-export class ReadFileTool
-  implements AgentTool<typeof readFileInputSchema, ReadFileOutput>
-{
+export class ReadFileTool implements AgentTool<
+  typeof readFileInputSchema,
+  ReadFileOutput
+> {
   public static readonly toolName = "readFile";
 
   public readonly name = ReadFileTool.toolName;
