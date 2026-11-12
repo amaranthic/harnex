@@ -108,8 +108,8 @@ describe("credentialsValidation", () => {
   });
 
   it("should throw HernexMissingCredentialsError when apiKey is missing or null", () => {
-    // @ts-expect-error Testing missing apiKey
     expect(() =>
+      // @ts-expect-error Testing missing apiKey
       validateCredentials({ baseUrl: "https://api.openai.com/v1" }, "openai"),
     ).toThrow(HernexMissingCredentialsError);
 
@@ -138,8 +138,8 @@ describe("credentialsValidation", () => {
   });
 
   it("should throw HernexMissingCredentialsError when baseUrl is missing", () => {
-    // @ts-expect-error Testing missing baseUrl
     expect(() =>
+      // @ts-expect-error Testing missing baseUrl
       validateCredentials({ apiKey: "sk-valid-key" }, "anthropic"),
     ).toThrow(HernexMissingCredentialsError);
 
