@@ -20,24 +20,30 @@ export type EncodedValue =
   | { readonly type: "uint8array"; readonly base64: string }
   | { readonly type: "url"; readonly href: string }
   | { readonly type: "array"; readonly items: readonly EncodedValue[] }
-  | { readonly type: "object"; readonly entries: Record<string, EncodedValue> }
+  | {
+      readonly type: "object";
+      readonly entries: Record<string, EncodedValue>;
+      readonly isNullPrototype?: boolean;
+    }
   | { readonly type: "binary"; readonly base64: string }; // Legacy backward compatibility
 
 /**
  * Encodes an arbitrary JavaScript value into a lossless tagged JSON-safe representation.
  *
  * Supports primitives, special numbers (NaN, Infinity, -Infinity, -0), Buffer, Uint8Array,
- * URL, arrays, and plain objects. Rejects circular references, functions, symbols, bigint,
- * and unsupported prototypes fail-closed with a TypeError.
+ * URL, arrays, and plain objects (including null-prototype dictionaries). Allows shared
+ * acyclic references (diamond structures) while rejecting true circular references fail-closed.
+ * Rejects functions, symbols, bigint, and unsupported prototypes fail-closed with a TypeError.
+ * Safely preserves special object keys (such as `__proto__`) without altering object prototypes.
  *
  * @param value - Any JavaScript value.
- * @param seen - Internal Set of traversed objects to detect circular references.
+ * @param ancestors - Internal Set of active call-stack ancestor objects to detect circular reference cycles.
  * @returns Lossless tagged EncodedValue.
  * @throws {TypeError} When value contains functions, symbols, bigint, circular references, or unsupported prototypes.
  */
 export function encodeValue(
   value: unknown,
-  seen: WeakSet<object> = new WeakSet(),
+  ancestors: Set<object> = new Set(),
 ): EncodedValue {
   if (value === null) {
     return { type: "null" };
@@ -80,56 +86,69 @@ export function encodeValue(
   }
 
   if (typeof value === "object") {
-    if (seen.has(value)) {
+    if (ancestors.has(value)) {
       throw new TypeError("Cannot encode value: circular reference detected.");
     }
-    seen.add(value);
+    ancestors.add(value);
 
-    if (Buffer.isBuffer(value)) {
-      return {
-        type: "buffer",
-        base64: value.toString("base64"),
-      };
-    }
+    try {
+      if (Buffer.isBuffer(value)) {
+        return {
+          type: "buffer",
+          base64: value.toString("base64"),
+        };
+      }
 
-    if (value instanceof Uint8Array) {
-      const buffer = Buffer.from(
-        value.buffer,
-        value.byteOffset,
-        value.byteLength,
-      );
-      return {
-        type: "uint8array",
-        base64: buffer.toString("base64"),
-      };
-    }
+      if (value instanceof Uint8Array) {
+        const buffer = Buffer.from(
+          value.buffer,
+          value.byteOffset,
+          value.byteLength,
+        );
+        return {
+          type: "uint8array",
+          base64: buffer.toString("base64"),
+        };
+      }
 
-    if (value instanceof URL) {
-      return {
-        type: "url",
-        href: value.href,
-      };
-    }
+      if (value instanceof URL) {
+        return {
+          type: "url",
+          href: value.href,
+        };
+      }
 
-    if (Array.isArray(value)) {
-      return {
-        type: "array",
-        items: value.map((item) => encodeValue(item, seen)),
-      };
-    }
+      if (Array.isArray(value)) {
+        return {
+          type: "array",
+          items: value.map((item) => encodeValue(item, ancestors)),
+        };
+      }
 
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) {
-      throw new TypeError(
-        `Cannot encode value: unsupported prototype "${proto?.constructor?.name ?? "unknown"}".`,
-      );
-    }
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) {
+        throw new TypeError(
+          `Cannot encode value: unsupported prototype "${proto?.constructor?.name ?? "unknown"}".`,
+        );
+      }
 
-    const entries: Record<string, EncodedValue> = {};
-    for (const [k, v] of Object.entries(value)) {
-      entries[k] = encodeValue(v, seen);
+      const isNullPrototype = proto === null;
+      const entries: Record<string, EncodedValue> = Object.create(null);
+      for (const [k, v] of Object.entries(value)) {
+        Object.defineProperty(entries, k, {
+          value: encodeValue(v, ancestors),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+      }
+
+      return isNullPrototype
+        ? { type: "object", entries, isNullPrototype: true }
+        : { type: "object", entries };
+    } finally {
+      ancestors.delete(value);
     }
-    return { type: "object", entries };
   }
 
   throw new TypeError(
@@ -139,6 +158,9 @@ export function encodeValue(
 
 /**
  * Decodes a tagged EncodedValue back to its original JavaScript form.
+ *
+ * Preserves null prototypes when indicated by `isNullPrototype`, and defines properties
+ * using safe own-property definition semantics to prevent prototype tampering.
  *
  * @param encoded - The EncodedValue.
  * @returns Restored original JavaScript value.
@@ -175,9 +197,16 @@ export function decodeValue(encoded: EncodedValue): unknown {
     case "array":
       return encoded.items.map(decodeValue);
     case "object": {
-      const result: Record<string, unknown> = {};
+      const result: Record<string, unknown> = encoded.isNullPrototype
+        ? Object.create(null)
+        : {};
       for (const [k, v] of Object.entries(encoded.entries)) {
-        result[k] = decodeValue(v);
+        Object.defineProperty(result, k, {
+          value: decodeValue(v),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return result;
     }

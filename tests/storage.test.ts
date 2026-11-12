@@ -22,6 +22,7 @@ import {
   withFileLock,
   withWorkspaceFileLock,
   getWorkspaceLockPath,
+  isProcessAlive,
   appendJsonl,
   readJsonl,
   encodeValue,
@@ -396,6 +397,120 @@ describe("storage primitives", () => {
         unlinkSpy.mockRestore();
       }
     });
+
+    it("correctly identifies process liveness with isProcessAlive", () => {
+      // Current process is alive
+      expect(isProcessAlive(process.pid)).toBe(true);
+      // Non-existent PID is dead
+      expect(isProcessAlive(9999999)).toBe(false);
+      // Invalid PIDs
+      expect(isProcessAlive(0)).toBe(false);
+      expect(isProcessAlive(-1)).toBe(false);
+      expect(isProcessAlive(1.5)).toBe(false);
+    });
+
+    it("safely recovers a stale lock held by a dead PID without waiting for timeout", async () => {
+      const lockFile = path.join(testDir, "stale_dead_pid.lock");
+      // Pre-create lock file simulating a dead process (PID 9999999)
+      writeFileSync(
+        lockFile,
+        JSON.stringify({
+          pid: 9999999,
+          token: "dead_owner_token",
+          createdAt: Date.now() - 5000,
+        }),
+      );
+
+      const result = await withFileLock(
+        lockFile,
+        async () => {
+          expect(existsSync(lockFile)).toBe(true);
+          const currentContent = JSON.parse(readFileSync(lockFile, "utf-8"));
+          expect(currentContent.pid).toBe(process.pid);
+          expect(currentContent.token).not.toBe("dead_owner_token");
+          return "recovered_ok";
+        },
+        { timeoutMs: 1000 },
+      );
+
+      expect(result).toBe("recovered_ok");
+      expect(existsSync(lockFile)).toBe(false);
+    });
+
+    it("safely recovers a stale lock whose age exceeds staleMs even if PID is alive", async () => {
+      const lockFile = path.join(testDir, "stale_age_exceeded.lock");
+      writeFileSync(
+        lockFile,
+        JSON.stringify({
+          pid: process.pid,
+          token: "aged_owner_token",
+          createdAt: Date.now() - 100_000,
+        }),
+      );
+
+      const result = await withFileLock(
+        lockFile,
+        async () => {
+          const currentContent = JSON.parse(readFileSync(lockFile, "utf-8"));
+          expect(currentContent.token).not.toBe("aged_owner_token");
+          return "reclaimed_by_stale_ms";
+        },
+        { staleMs: 50_000, timeoutMs: 1000 },
+      );
+
+      expect(result).toBe("reclaimed_by_stale_ms");
+      expect(existsSync(lockFile)).toBe(false);
+    });
+
+    it("aborts stale lock reclamation without displacing new owner if lock was replaced during race", async () => {
+      const lockFile = path.join(testDir, "reclaim_race.lock");
+      writeFileSync(
+        lockFile,
+        JSON.stringify({
+          pid: 9999999,
+          token: "abandoned_token",
+          createdAt: Date.now() - 10000,
+        }),
+      );
+
+      // Simulate another process taking the lock right before atomic rename
+      const originalRename = fsPromises.rename;
+      let replacedByAnotherProcess = false;
+      const renameSpy = spyOn(fsPromises, "rename").mockImplementation(
+        async (from, to) => {
+          if (to === path.resolve(lockFile) && !replacedByAnotherProcess) {
+            replacedByAnotherProcess = true;
+            // Write a live owner lock
+            writeFileSync(
+              lockFile,
+              JSON.stringify({
+                pid: process.pid,
+                token: "active_legit_token",
+                createdAt: Date.now(),
+              }),
+            );
+            // Staging rename will fail
+            throw new Error("simulated contention collision");
+          }
+          return originalRename(from, to);
+        },
+      );
+
+      try {
+        await expect(
+          withFileLock(lockFile, async () => "should_not_run", {
+            timeoutMs: 100,
+            retryIntervalMs: 20,
+          }),
+        ).rejects.toThrow();
+
+        // The live owner's lock file must NOT have been displaced
+        const content = JSON.parse(readFileSync(lockFile, "utf-8"));
+        expect(content.token).toBe("active_legit_token");
+      } finally {
+        renameSpy.mockRestore();
+      }
+    });
   });
 
   describe("withWorkspaceFileLock", () => {
@@ -668,6 +783,98 @@ describe("storage primitives", () => {
       expect(() => encodeValue(new CustomEntity(1))).toThrow(
         /unsupported prototype/,
       );
+    });
+
+    it("encodes and decodes valid acyclic diamond structures and shared sibling references losslessly", () => {
+      const sharedItem = {
+        id: "shared-meta",
+        attributes: ["active", "primary"],
+        count: 100,
+      };
+
+      const diamondObject = {
+        leftBranch: sharedItem,
+        rightBranch: sharedItem,
+        directArray: [sharedItem, sharedItem],
+        nested: {
+          deepRef: sharedItem,
+        },
+      };
+
+      const encoded = encodeValue(diamondObject);
+      const decoded = decodeValue(encoded) as typeof diamondObject;
+
+      expect(decoded.leftBranch.id).toBe("shared-meta");
+      expect(decoded.rightBranch.id).toBe("shared-meta");
+      expect(decoded.leftBranch.count).toBe(100);
+      expect(decoded.directArray[0]!.attributes).toEqual(["active", "primary"]);
+      expect(decoded.directArray[1]!.id).toBe("shared-meta");
+      expect(decoded.nested.deepRef.id).toBe("shared-meta");
+    });
+
+    it("rejects indirect circular reference cycles in objects and arrays fail-closed", () => {
+      const parent: Record<string, unknown> = { name: "parent" };
+      const child: Record<string, unknown> = { parent };
+      parent.child = child;
+
+      expect(() => encodeValue(parent)).toThrow(TypeError);
+      expect(() => encodeValue(parent)).toThrow("circular reference detected");
+
+      const cyclicArray: unknown[] = [];
+      cyclicArray.push(cyclicArray);
+      expect(() => encodeValue(cyclicArray)).toThrow(TypeError);
+      expect(() => encodeValue(cyclicArray)).toThrow(
+        "circular reference detected",
+      );
+    });
+
+    it("preserves __proto__ property as an own property without prototype manipulation", () => {
+      const maliciousPayload: Record<string, unknown> = {};
+      Object.defineProperty(maliciousPayload, "__proto__", {
+        value: { isAdmin: true, injectedSecret: "compromised" },
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+
+      const encoded = encodeValue(maliciousPayload);
+      const decoded = decodeValue(encoded) as Record<string, unknown>;
+
+      // The property must be an own property
+      expect(Object.prototype.hasOwnProperty.call(decoded, "__proto__")).toBe(
+        true,
+      );
+      // The prototype of decoded object must remain Object.prototype
+      expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+      // It must NOT pollute or inject properties onto Object.prototype or empty objects
+      expect((decoded as any).isAdmin).toBeUndefined();
+      expect(({} as any).isAdmin).toBeUndefined();
+      expect(({} as any).injectedSecret).toBeUndefined();
+      // The encoded value round-trips correctly
+      expect((decoded as any)["__proto__"]).toEqual({
+        isAdmin: true,
+        injectedSecret: "compromised",
+      });
+    });
+
+    it("preserves null-prototype dictionary objects across round-trip encoding and decoding", () => {
+      const nullDict: Record<string, unknown> = Object.create(null);
+      nullDict.alpha = "first";
+      nullDict.beta = 42;
+      nullDict.nested = { standard: true };
+
+      const encoded = encodeValue(nullDict);
+      expect(encoded.type).toBe("object");
+      if (encoded.type === "object") {
+        expect(encoded.isNullPrototype).toBe(true);
+      }
+
+      const decoded = decodeValue(encoded) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(decoded)).toBeNull();
+      expect(decoded.alpha).toBe("first");
+      expect(decoded.beta).toBe(42);
+      expect((decoded.nested as any).standard).toBe(true);
+      expect(Object.getPrototypeOf(decoded.nested)).toBe(Object.prototype);
     });
   });
 });
