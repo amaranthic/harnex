@@ -76,7 +76,7 @@ export class WriteFileTool implements AgentTool<
           context.threadId,
           {
             workingDirectory: context.workingDirectory,
-            turnIndex: context.turnIndex ?? 0,
+            turnIndex: context.turnIndex,
             label: `writeFile: ${parameters.filePath}`,
             files: [relativeFilePath],
             source: { toolName: WriteFileTool.toolName },

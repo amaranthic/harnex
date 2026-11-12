@@ -41,7 +41,7 @@ export const globInputSchema = z.object({
     .describe(
       "The glob pattern to match files against (e.g. '**/*.ts', 'packages/*/package.json').",
     ),
-  path: z
+  directoryPath: z
     .string()
     .optional()
     .describe(
@@ -54,7 +54,7 @@ export const globInputSchema = z.object({
  */
 export interface GlobOutput {
   readonly pattern: string;
-  readonly searchPath: string;
+  readonly directoryPath: string;
   readonly matches: readonly string[];
   readonly count: number;
   readonly durationMs: number;
@@ -74,7 +74,7 @@ export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
   /**
    * Executes the glob search operation.
    *
-   * @param parameters - Validated parameters containing pattern and optional path.
+   * @param parameters - Validated parameters containing pattern and optional directoryPath.
    * @param context - The execution context with workingDirectory.
    * @returns A promise resolving to the structured glob output.
    */
@@ -84,20 +84,20 @@ export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
   ): Promise<GlobOutput> {
     const startTime = Date.now();
     const searchDir = resolvePathWithinWorkspace(
-      parameters.path ?? ".",
+      parameters.directoryPath ?? ".",
       context.workingDirectory,
     );
 
     if (!existsSync(searchDir)) {
       throw new Error(
-        `Search directory not found: ${parameters.path ?? searchDir}`,
+        `Search directory not found: ${parameters.directoryPath ?? searchDir}`,
       );
     }
 
     const rootStats = await lstat(searchDir);
     if (!rootStats.isDirectory()) {
       throw new Error(
-        `Search path is not a directory: ${parameters.path ?? searchDir}`,
+        `Search path is not a directory: ${parameters.directoryPath ?? searchDir}`,
       );
     }
 
@@ -163,7 +163,7 @@ export class GlobTool implements AgentTool<typeof globInputSchema, GlobOutput> {
 
     return {
       pattern: parameters.pattern,
-      searchPath: parameters.path ?? ".",
+      directoryPath: parameters.directoryPath ?? ".",
       matches: matchedFiles,
       count: matchedFiles.length,
       durationMs,

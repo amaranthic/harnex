@@ -61,6 +61,20 @@ All built-in file tools ([`ReadFileTool`](../src/tools/ReadFileTool.ts), [`Write
 - Symlink traversal outside the workspace boundary is detected via `lstat` and strictly denied.
 - Writes and edits use atomic sibling temporary file replacement (`atomicWriteFile`) to guarantee zero torn writes.
 
+### 3.1 File Discovery (`GlobTool`)
+
+- `pattern` (required): Glob pattern to match files against (e.g. `'**/*.ts'`).
+- `directoryPath` (optional): Directory to search within. Defaults to the workspace root.
+
+### 3.2 Content Search (`GrepTool`)
+
+- `pattern` (required): Regular expression pattern to search for in file contents.
+- `filePath` (optional): Single file to search within. Mutually exclusive with `directoryPath`.
+- `directoryPath` (optional): Directory scope to search within. Mutually exclusive with `filePath`. Defaults to workspace root when neither is provided.
+- `glob` (optional): Glob pattern to filter files within the directory (e.g. `'*.ts'`).
+- `caseInsensitive` (optional): Whether to perform case-insensitive matching.
+- `headLimit` (optional, default: 250): Maximum number of match entries to return.
+
 ---
 
 ## 4. Shell Execution: `BashTool` & `TaskManager`

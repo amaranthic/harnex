@@ -18,7 +18,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
  * - Propagates permission and I/O failures without swallowing.
  *
  * @param targetPath - Path requested by tool arguments.
- * @param rootDir - Workspace root directory.
+ * @param workingDirectory - Workspace root directory.
  * @returns Fully resolved absolute path within the workspace root.
  * @throws Error if the path escapes the workspace root or encounters a symbolic link.
  *
@@ -29,9 +29,9 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
  */
 export function resolvePathWithinWorkspace(
   targetPath: string,
-  rootDir: string,
+  workingDirectory: string,
 ): string {
-  const normalizedRoot = resolve(rootDir);
+  const normalizedRoot = resolve(workingDirectory);
   let canonicalRoot: string;
   try {
     canonicalRoot = realpathSync(normalizedRoot);

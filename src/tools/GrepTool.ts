@@ -60,35 +60,47 @@ const excludedDirectorySegments = [
 /**
  * Input parameter schema for GrepTool.
  */
-export const grepInputSchema = z.object({
-  pattern: z
-    .string()
-    .describe("The regular expression or text pattern to search for."),
-  path: z
-    .string()
-    .optional()
-    .describe(
-      "File or directory to search within. Defaults to workspace root directory.",
-    ),
-  glob: z
-    .string()
-    .optional()
-    .describe(
-      "Optional glob pattern to filter search files (e.g. '*.ts', '*.json').",
-    ),
-  caseInsensitive: z
-    .boolean()
-    .optional()
-    .describe(
-      "Whether to perform case-insensitive matching. Defaults to false.",
-    ),
-  headLimit: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe("Maximum number of match entries to return. Defaults to 250."),
-});
+export const grepInputSchema = z
+  .object({
+    pattern: z
+      .string()
+      .describe("The regular expression pattern to search for."),
+    filePath: z
+      .string()
+      .optional()
+      .describe(
+        "Optional single file path to search within. Mutually exclusive with directoryPath.",
+      ),
+    directoryPath: z
+      .string()
+      .optional()
+      .describe(
+        "Optional directory path to search within. Mutually exclusive with filePath. Defaults to workspace root directory if neither is specified.",
+      ),
+    glob: z
+      .string()
+      .optional()
+      .describe(
+        "Optional glob pattern to filter search files within a directory (e.g. '*.ts', '*.json').",
+      ),
+    caseInsensitive: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether to perform case-insensitive matching. Defaults to false.",
+      ),
+    headLimit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Maximum number of match entries to return. Defaults to 250."),
+  })
+  .refine((data) => !(data.filePath && data.directoryPath), {
+    message:
+      "Cannot specify both filePath and directoryPath. Choose one target scope.",
+    path: ["filePath"],
+  });
 
 /**
  * Structure of a single grep line match.
@@ -104,7 +116,8 @@ export interface GrepMatch {
  */
 export interface GrepOutput {
   readonly pattern: string;
-  readonly searchPath: string;
+  readonly filePath?: string | undefined;
+  readonly directoryPath?: string | undefined;
   readonly matches: readonly GrepMatch[];
   readonly totalMatches: number;
   readonly durationMs: number;
@@ -124,7 +137,7 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
   /**
    * Executes the grep content search.
    *
-   * @param parameters - Validated parameters containing pattern, path, glob, etc.
+   * @param parameters - Validated parameters containing pattern, filePath, directoryPath, glob, etc.
    * @param context - The execution context with workingDirectory.
    * @returns A promise resolving to the structured grep output.
    */
@@ -133,23 +146,6 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
     context: ToolExecutionContext,
   ): Promise<GrepOutput> {
     const startTime = Date.now();
-    const targetPath = resolvePathWithinWorkspace(
-      parameters.path ?? ".",
-      context.workingDirectory,
-    );
-
-    if (!existsSync(targetPath)) {
-      throw new Error(
-        `Target path not found: ${parameters.path ?? targetPath}`,
-      );
-    }
-
-    const targetStats = await lstat(targetPath);
-    if (targetStats.isSymbolicLink()) {
-      throw new Error(
-        `Target path is a symbolic link: ${parameters.path ?? targetPath}`,
-      );
-    }
     const flags = parameters.caseInsensitive ? "i" : "";
     let regex: RegExp;
     try {
@@ -164,7 +160,28 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
     let isTruncated = false;
     const limit = parameters.headLimit ?? defaultGrepLimit;
 
-    if (targetStats.isFile()) {
+    if (parameters.filePath) {
+      const targetPath = resolvePathWithinWorkspace(
+        parameters.filePath,
+        context.workingDirectory,
+      );
+
+      if (!existsSync(targetPath)) {
+        throw new Error(`Target file not found: ${parameters.filePath}`);
+      }
+
+      const targetStats = await lstat(targetPath);
+      if (targetStats.isSymbolicLink()) {
+        throw new Error(
+          `Target path is a symbolic link: ${parameters.filePath}`,
+        );
+      }
+      if (targetStats.isDirectory()) {
+        throw new Error(
+          `Target filePath is a directory: ${parameters.filePath}. Use directoryPath instead.`,
+        );
+      }
+
       isTruncated = await this.searchFile(
         targetPath,
         context.workingDirectory,
@@ -173,6 +190,26 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
         limit,
       );
     } else {
+      const dirScope = parameters.directoryPath ?? ".";
+      const targetPath = resolvePathWithinWorkspace(
+        dirScope,
+        context.workingDirectory,
+      );
+
+      if (!existsSync(targetPath)) {
+        throw new Error(`Target directory not found: ${dirScope}`);
+      }
+
+      const targetStats = await lstat(targetPath);
+      if (targetStats.isSymbolicLink()) {
+        throw new Error(`Target path is a symbolic link: ${dirScope}`);
+      }
+      if (targetStats.isFile()) {
+        throw new Error(
+          `Target directoryPath is a file: ${dirScope}. Use filePath instead.`,
+        );
+      }
+
       const filePattern = parameters.glob ?? "**/*";
       const globIterator = glob(filePattern, { cwd: targetPath });
 
@@ -246,7 +283,9 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
 
     return {
       pattern: parameters.pattern,
-      searchPath: parameters.path ?? ".",
+      ...(parameters.filePath
+        ? { filePath: parameters.filePath }
+        : { directoryPath: parameters.directoryPath ?? "." }),
       matches,
       totalMatches: matches.length,
       durationMs,
@@ -258,7 +297,7 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
    * Helper that searches a single file for regex line matches.
    *
    * @param fullFilePath - Absolute path of file to read.
-   * @param rootDir - Workspace root for relative path derivation.
+   * @param workingDirectory - Workspace root for relative path derivation.
    * @param regex - Compiled regex pattern to test against each line.
    * @param matches - Output array to push matching items into.
    * @param limit - Maximum match count.
@@ -266,7 +305,7 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
    */
   private async searchFile(
     fullFilePath: string,
-    rootDir: string,
+    workingDirectory: string,
     regex: RegExp,
     matches: GrepMatch[],
     limit: number,
@@ -322,7 +361,10 @@ export class GrepTool implements AgentTool<typeof grepInputSchema, GrepOutput> {
       return false;
     }
 
-    const relPath = relative(rootDir, fullFilePath).replace(/\\/g, "/");
+    const relPath = relative(workingDirectory, fullFilePath).replace(
+      /\\/g,
+      "/",
+    );
     const content = buffer.toString("utf-8");
     const lines = content.split("\n");
 

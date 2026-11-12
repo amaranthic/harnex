@@ -49,13 +49,13 @@ export const taskManagerDescription =
  */
 export const globDescription =
   "Searches for files across the workspace matching a glob pattern (e.g. '**/*.ts', 'src/**/*.json'). " +
-  "Automatically ignores version control and dependency directories like .git and node_modules. " +
+  "Supports directoryPath scoping and automatically ignores version control and dependency directories like .git and node_modules. " +
   "Returns matching relative file paths with a cap of 250 results.";
 
 /**
  * System prompt description for GrepTool.
  */
 export const grepDescription =
-  "Searches file contents across the workspace matching a regular expression or plain text pattern. " +
-  "Supports path scoping, file glob filtering, and case-insensitive matching. " +
-  "Returns matching relative file paths with line numbers and line content.";
+  "Searches file contents across the workspace matching a regular expression pattern. " +
+  "Supports single-file targeting via filePath or directory scoping via directoryPath with optional file glob filtering, " +
+  "and case-insensitive matching. Returns matching relative file paths with line numbers and line content.";

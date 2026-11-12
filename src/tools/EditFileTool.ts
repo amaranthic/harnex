@@ -115,7 +115,7 @@ export class EditFileTool implements AgentTool<
           context.threadId,
           {
             workingDirectory: context.workingDirectory,
-            turnIndex: context.turnIndex ?? 0,
+            turnIndex: context.turnIndex,
             label: `editFile: ${parameters.filePath}`,
             files: [relativeFilePath],
             source: { toolName: EditFileTool.toolName },

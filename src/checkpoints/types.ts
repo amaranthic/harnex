@@ -25,8 +25,8 @@ export interface CheckpointRecord {
   readonly sequence: number;
   /** Safe thread identifier that owns this checkpoint. */
   readonly threadId: string;
-  /** Agent turn index during which this checkpoint was recorded. */
-  readonly turnIndex: number;
+  /** One-based agent turn index during which this checkpoint was recorded, or undefined if created outside an active engine turn. */
+  readonly turnIndex?: number | undefined;
   /** Descriptive human-readable label for the checkpoint. */
   readonly label: string;
   /** Source attributing creation to manual product code or a specific tool execution. */
@@ -43,8 +43,8 @@ export interface CheckpointRecord {
 export interface CreateCheckpointInput {
   /** Canonical workspace root directory. */
   readonly workingDirectory: string;
-  /** Agent turn index. */
-  readonly turnIndex: number;
+  /** Optional one-based agent turn index. Omit when recorded outside an active agent turn. */
+  readonly turnIndex?: number | undefined;
   /** Descriptive label. */
   readonly label: string;
   /** Explicit relative file paths to capture. Must contain at least one path. */

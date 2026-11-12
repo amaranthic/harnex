@@ -298,9 +298,11 @@ describe("Built-in File & Shell Tools", () => {
     );
     expect(lastCreatedEvent?.label).toBe("editFile: doc.txt");
 
-    // Checkpoints were recorded
+    // Checkpoints were recorded with undefined turnIndex (omitted context index is not serialized as turn 0)
     const cps = await checkpointStore.listCheckpoints("tool-checkpoint-thread");
     expect(cps.length).toBe(2);
+    expect(cps[0]?.turnIndex).toBeUndefined();
+    expect(cps[1]?.turnIndex).toBeUndefined();
 
     // 3. Rollback the second checkpoint to restore file to "initial content"
     const restoreResult = await checkpointStore.restoreCheckpoint(
@@ -360,6 +362,9 @@ describe("Built-in File & Shell Tools", () => {
       "export const ALPHA = 42;\n",
     );
     writeFileSync(join(testWorkspace, "fileB.ts"), "export const BETA = 99;\n");
+    const subDir = join(testWorkspace, "sub");
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(join(subDir, "fileC.ts"), "export const ALPHA = 100;\n");
     mkdirSync(join(testWorkspace, "node_modules"), { recursive: true });
     writeFileSync(
       join(testWorkspace, "node_modules", "ignored.ts"),
@@ -375,19 +380,64 @@ describe("Built-in File & Shell Tools", () => {
       workingDirectory: testWorkspace,
     };
 
-    // Glob search
+    // 1. Glob search default workspace
     const globRes = await globTool.execute({ pattern: "**/*.ts" }, context);
     expect(globRes.matches).toContain("fileA.ts");
     expect(globRes.matches).toContain("fileB.ts");
+    expect(globRes.matches).toContain("sub/fileC.ts");
+    expect(globRes.directoryPath).toBe(".");
     // Verifies node_modules is ignored
     expect(globRes.matches.some((m) => m.includes("node_modules"))).toBe(false);
 
-    // Grep search
+    // 2. Glob search with explicit directoryPath
+    const globSubRes = await globTool.execute(
+      { pattern: "*.ts", directoryPath: "sub" },
+      context,
+    );
+    expect(globSubRes.matches).toContain("sub/fileC.ts");
+    expect(globSubRes.matches).not.toContain("fileA.ts");
+    expect(globSubRes.directoryPath).toBe("sub");
+
+    // 3. Grep search with directoryPath (default root)
     const grepRes = await grepTool.execute({ pattern: "ALPHA" }, context);
-    expect(grepRes.totalMatches).toBe(1);
-    expect(grepRes.matches[0]?.filePath).toBe("fileA.ts");
-    expect(grepRes.matches[0]?.lineNumber).toBe(1);
-    expect(grepRes.matches[0]?.line).toContain("export const ALPHA = 42;");
+    expect(grepRes.totalMatches).toBe(2);
+    expect(grepRes.directoryPath).toBe(".");
+    expect(grepRes.matches.some((m) => m.filePath === "fileA.ts")).toBe(true);
+    expect(grepRes.matches.some((m) => m.filePath === "sub/fileC.ts")).toBe(
+      true,
+    );
+
+    // 4. Grep search scoped to specific single filePath
+    const grepFileRes = await grepTool.execute(
+      { pattern: "ALPHA", filePath: "fileA.ts" },
+      context,
+    );
+    expect(grepFileRes.totalMatches).toBe(1);
+    expect(grepFileRes.filePath).toBe("fileA.ts");
+    expect(grepFileRes.matches[0]?.filePath).toBe("fileA.ts");
+    expect(grepFileRes.matches[0]?.lineNumber).toBe(1);
+    expect(grepFileRes.matches[0]?.line).toContain("export const ALPHA = 42;");
+
+    // 5. Grep schema rejects supplying both filePath and directoryPath
+    const invalidParse = grepTool.inputSchema.safeParse({
+      pattern: "ALPHA",
+      filePath: "fileA.ts",
+      directoryPath: "sub",
+    });
+    expect(invalidParse.success).toBe(false);
+
+    // 6. Grep rejects filePath pointing to a directory
+    await expect(
+      grepTool.execute({ pattern: "ALPHA", filePath: "sub" }, context),
+    ).rejects.toThrow("Target filePath is a directory");
+
+    // 7. Grep rejects directoryPath pointing to a file
+    await expect(
+      grepTool.execute(
+        { pattern: "ALPHA", directoryPath: "fileA.ts" },
+        context,
+      ),
+    ).rejects.toThrow("Target directoryPath is a file");
   });
 
   it("preserves literal regex substitution sequences in EditFileTool replacements", async () => {
@@ -663,7 +713,7 @@ describe("Built-in File & Shell Tools", () => {
 
     // Single-file headLimit truncation sets isTruncated: true
     const res = await grepTool.execute(
-      { pattern: "match line", path: "many.txt", headLimit: 3 },
+      { pattern: "match line", filePath: "many.txt", headLimit: 3 },
       context,
     );
     expect(res.matches.length).toBe(3);

@@ -28,7 +28,7 @@ export interface ToolExecutionContext {
   readonly workingDirectory: string;
 
   /**
-   * Optional zero-based turn index of the current agent turn.
+   * Optional one-based turn index of the current agent turn.
    */
   readonly turnIndex?: number | undefined;
 
