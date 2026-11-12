@@ -95,7 +95,7 @@ for await (const event of engine.runTurn("Refactor src/storage.ts")) {
 
 ### 3.3 Tool Events
 
-- **`toolCallProposed`**: Emitted when model calls a tool with validated parameters. Fields: `callId`, `toolName`, `parameters` (`JsonValue`).
+- **`toolCallProposed`**: Emitted when the model proposes a tool invocation. Parameters contain raw, unvalidated model JSON input. Schema validation and authorization (`onAuthorizeTool`) occur subsequently before execution. Fields: `callId`, `toolName`, `parameters` (`JsonValue`).
 - **`toolExecutionStarted`**: Emitted immediately before tool execution begins. Fields: `callId`, `toolName`, `timestamp`.
 - **`toolExecutionDelta`**: Streaming live output chunks from long-running operations. Fields: `callId`, `toolName`, `chunk`.
 - **`toolExecutionFinished`**: Emitted when tool completes. Fields: `callId`, `toolName`, `result` (`JsonValue`), `isError`, `durationMs`.

@@ -48,6 +48,19 @@ describe("ToolRegistry", () => {
     expect(registry.has("glob")).toBe(true);
     expect(registry.has("grep")).toBe(true);
     expect(registry.list().length).toBe(7);
+
+    // Verify tool prompt descriptions match actual capabilities (F-005)
+    const taskManagerTool = registry.resolve("taskManager")!;
+    expect(taskManagerTool.description).not.toContain("spawn");
+    expect(taskManagerTool.description).not.toContain("spawning");
+
+    const grepTool = registry.resolve("grep")!;
+    expect(grepTool.description).not.toContain("plain text");
+    expect(grepTool.description).toContain("filePath");
+    expect(grepTool.description).toContain("directoryPath");
+
+    const globTool = registry.resolve("glob")!;
+    expect(globTool.description).toContain("directoryPath");
   });
 
   it("starts empty when includeDefaults is false", () => {

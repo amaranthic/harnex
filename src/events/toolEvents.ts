@@ -6,7 +6,9 @@
 import type { JsonValue } from "./types.js";
 
 /**
- * Event emitted when the model proposes a tool invocation with parsed arguments.
+ * Event emitted when the model proposes a tool invocation.
+ * Note: The parameters contain raw, unvalidated model JSON input. Schema validation
+ * and authorization (onAuthorizeTool) occur subsequently before tool execution.
  */
 export interface ToolCallProposedEvent {
   /** Discriminant event type. */
@@ -15,7 +17,7 @@ export interface ToolCallProposedEvent {
   readonly callId: string;
   /** Name of the tool to be executed. */
   readonly toolName: string;
-  /** Parsed arguments supplied by the model. */
+  /** Raw proposed arguments supplied by the model before schema validation. */
   readonly parameters: JsonValue;
 }
 

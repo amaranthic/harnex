@@ -40,9 +40,9 @@ export const bashDescription =
  * System prompt description for TaskManagerTool.
  */
 export const taskManagerDescription =
-  "Manages background shell tasks. " +
-  "Supports spawning new commands, listing active and recent tasks, line-paged log inspection with offset and limit, " +
-  "delivering interactive stdin input, terminating processes, and deleting completed tasks.";
+  "Manages background shell tasks created by bash commands. " +
+  "Supports listing active and recent tasks, line-paged log inspection with offset and limit, " +
+  "delivering interactive stdin input, terminating running processes, and deleting completed tasks.";
 
 /**
  * System prompt description for GlobTool.
