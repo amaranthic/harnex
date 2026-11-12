@@ -654,6 +654,9 @@ export async function* runTurn(
           checkpointStore: config.checkpointStore,
           isCheckpointEnabled,
           taskManager: config.taskManager,
+          model: options.model ?? config.model,
+          apiKey: options.apiKey ?? config.apiKey,
+          baseUrl: options.baseUrl ?? config.baseUrl,
           onCheckpointCreated: (evt) => {
             const checkpointEvent: CheckpointCreatedEvent = {
               type: "checkpointCreated",

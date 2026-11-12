@@ -31,15 +31,16 @@ import {
   TaskManager,
   TaskManagerTool,
   ToolRegistry,
+  WebFetchTool,
   WriteFileTool,
 } from "../src/tools/index.js";
 
 describe("ToolRegistry", () => {
-  it("registers all 7 default tools when includeDefaults is true", () => {
+  it("registers all 8 default tools when includeDefaults is true", () => {
     const registry = new ToolRegistry();
     const list = registry.list();
 
-    expect(list.length).toBe(7);
+    expect(list.length).toBe(8);
     expect(registry.has("readFile")).toBe(true);
     expect(registry.has("writeFile")).toBe(true);
     expect(registry.has("editFile")).toBe(true);
@@ -47,7 +48,8 @@ describe("ToolRegistry", () => {
     expect(registry.has("taskManager")).toBe(true);
     expect(registry.has("glob")).toBe(true);
     expect(registry.has("grep")).toBe(true);
-    expect(registry.list().length).toBe(7);
+    expect(registry.has("webFetch")).toBe(true);
+    expect(registry.list().length).toBe(8);
 
     // Verify tool prompt descriptions match actual capabilities (F-005)
     const taskManagerTool = registry.resolve("taskManager")!;
@@ -1256,6 +1258,260 @@ describe("Built-in File & Shell Tools", () => {
       }
 
       await taskManager.shutdown();
+    });
+  });
+
+  describe("WebFetchTool", () => {
+    it("rejects invalid, malformed, or oversized URLs", async () => {
+      const tool = new WebFetchTool();
+      const dummyContext = {
+        threadId: "test-thread",
+        toolCallId: "call_web_1",
+        workingDirectory: testWorkspace,
+      };
+
+      await expect(
+        tool.execute({ url: "not-a-url" }, dummyContext),
+      ).rejects.toThrow();
+
+      await expect(
+        tool.execute({ url: "ftp://example.com/file" }, dummyContext),
+      ).rejects.toThrow("Unsupported protocol");
+
+      await expect(
+        tool.execute({ url: "file:///etc/passwd" }, dummyContext),
+      ).rejects.toThrow("Unsupported protocol");
+
+      await expect(
+        tool.execute(
+          { url: "https://user:password@example.com/page" },
+          dummyContext,
+        ),
+      ).rejects.toThrow("basic authentication credentials");
+
+      const longUrl = "https://example.com/" + "a".repeat(2050);
+      await expect(
+        tool.execute({ url: longUrl }, dummyContext),
+      ).rejects.toThrow("exceeds maximum permitted length");
+    });
+
+    it("blocks private, loopback, carrier-grade NAT, and cloud metadata IPs (SSRF guard)", async () => {
+      const tool = new WebFetchTool();
+      const dummyContext = {
+        threadId: "test-thread",
+        toolCallId: "call_web_2",
+        workingDirectory: testWorkspace,
+      };
+
+      const blockedUrls = [
+        "http://localhost/test",
+        "http://127.0.0.1:8080/admin",
+        "http://10.0.0.1/status",
+        "http://192.168.1.1/router",
+        "http://172.16.0.1/internal",
+        "http://169.254.169.254/latest/meta-data",
+        "http://100.64.0.1/cgnat",
+        "http://0.0.0.0/zero",
+        "http://[::1]/ipv6loopback",
+        "http://[fe80::1]/linklocal",
+        "http://[fc00::1]/uniquelocal",
+        "http://metadata.google.internal/computeMetadata/v1",
+        "http://instance-data/latest/meta-data",
+        "http://corpnas/shares",
+      ];
+
+      for (const url of blockedUrls) {
+        await expect(tool.execute({ url }, dummyContext)).rejects.toThrow(
+          "blocked for security",
+        );
+      }
+    });
+
+    it("fetches HTML and cleanly converts it to Markdown via Turndown", async () => {
+      const htmlBody = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Sample Web Page</title>
+            <style>body { font-family: sans-serif; }</style>
+          </head>
+          <body>
+            <header>
+              <nav><a href="/home">Home</a></nav>
+            </header>
+            <main>
+              <h1>Main Headline</h1>
+              <p>Welcome to <strong>Hernex</strong>! Here is a <a href="https://example.com/docs">documentation link</a>.</p>
+              <script>alert("malicious script");</script>
+              <noscript>Please enable javascript</noscript>
+              <ul>
+                <li>First item</li>
+                <li>Second item</li>
+              </ul>
+            </main>
+          </body>
+        </html>
+      `;
+
+      const mockFetch: typeof fetch = async () =>
+        new Response(htmlBody, {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+
+      const tool = new WebFetchTool({ customFetch: mockFetch });
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_web_3",
+        workingDirectory: testWorkspace,
+      };
+
+      const result = await tool.execute(
+        { url: "https://example.com/article" },
+        context,
+      );
+
+      expect(result.status).toBe(200);
+      expect(result.cached).toBe(false);
+      expect(result.content).toContain("# Main Headline");
+      expect(result.content).toContain("**Hernex**");
+      expect(result.content).toContain(
+        "[documentation link](https://example.com/docs)",
+      );
+      expect(result.content).not.toContain("alert");
+      expect(result.content).not.toContain("<script");
+      expect(result.content).not.toContain("<style");
+      expect(result.extractedWithPrompt).toBe(false);
+    });
+
+    it("formats JSON responses into fenced code blocks", async () => {
+      const jsonBody = JSON.stringify({
+        name: "hernex",
+        version: "0.3.0",
+        active: true,
+      });
+      const mockFetch: typeof fetch = async () =>
+        new Response(jsonBody, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+
+      const tool = new WebFetchTool({ customFetch: mockFetch });
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_web_4",
+        workingDirectory: testWorkspace,
+      };
+
+      const result = await tool.execute(
+        { url: "https://api.example.com/status" },
+        context,
+      );
+
+      expect(result.contentType).toBe("application/json");
+      expect(result.content).toContain("```json");
+      expect(result.content).toContain('"name": "hernex"');
+    });
+
+    it("serves repeated requests from in-memory cache within TTL", async () => {
+      let networkFetchCount = 0;
+      const mockFetch: typeof fetch = async () => {
+        networkFetchCount++;
+        return new Response("<p>Cached content test</p>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        });
+      };
+
+      const tool = new WebFetchTool({
+        customFetch: mockFetch,
+        cacheTtlMs: 60000,
+      });
+
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_web_5",
+        workingDirectory: testWorkspace,
+      };
+
+      const firstResult = await tool.execute(
+        { url: "https://example.com/cache-page" },
+        context,
+      );
+      expect(firstResult.cached).toBe(false);
+      expect(networkFetchCount).toBe(1);
+
+      const secondResult = await tool.execute(
+        { url: "https://example.com/cache-page" },
+        context,
+      );
+      expect(secondResult.cached).toBe(true);
+      expect(networkFetchCount).toBe(1);
+      expect(secondResult.content).toBe(firstResult.content);
+    });
+
+    it("follows same-host redirects but halts on cross-host redirects", async () => {
+      const mockFetch: typeof fetch = async (inputUrl) => {
+        const urlStr = String(inputUrl);
+
+        if (urlStr === "https://example.com/start") {
+          return new Response(null, {
+            status: 301,
+            headers: { Location: "https://example.com/intermediate" },
+          });
+        }
+        if (urlStr === "https://example.com/intermediate") {
+          return new Response(null, {
+            status: 302,
+            headers: { Location: "https://external-service.org/landing" },
+          });
+        }
+        return new Response("<p>Final page</p>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        });
+      };
+
+      const tool = new WebFetchTool({ customFetch: mockFetch });
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_web_6",
+        workingDirectory: testWorkspace,
+      };
+
+      const result = await tool.execute(
+        { url: "https://example.com/start" },
+        context,
+      );
+
+      expect(result.content).toContain(
+        "Redirect detected to: https://external-service.org/landing",
+      );
+      expect(result.content).toContain(
+        "Automatic cross-host redirect halted for security and oversight",
+      );
+    });
+
+    it("requires context.model when prompt parameter is provided", async () => {
+      const mockFetch: typeof fetch = async () =>
+        new Response("<p>Some article</p>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        });
+
+      const tool = new WebFetchTool({ customFetch: mockFetch });
+      const contextWithoutModel = {
+        threadId: "test-thread",
+        toolCallId: "call_web_7",
+        workingDirectory: testWorkspace,
+      };
+
+      await expect(
+        tool.execute(
+          { url: "https://example.com/article", prompt: "summarize this" },
+          contextWithoutModel,
+        ),
+      ).rejects.toThrow("Extraction with 'prompt' requires an active model");
     });
   });
 });

@@ -294,7 +294,7 @@ describe("storage primitives", () => {
       writeFileSync(
         lockFile,
         JSON.stringify({
-          pid: 1234,
+          pid: process.pid,
           token: "other_token",
           createdAt: Date.now(),
         }),

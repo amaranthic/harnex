@@ -7,6 +7,7 @@
 
 import type { CheckpointStore } from "../checkpoints/index.js";
 import type { TaskManager } from "../tasks/TaskManager.js";
+import type { HernexModelInput } from "../model/types.js";
 
 /**
  * Execution context supplied to every tool execution.
@@ -51,6 +52,21 @@ export interface ToolExecutionContext {
    * Optional TaskManager instance for background shell process registration and management.
    */
   readonly taskManager?: TaskManager | undefined;
+
+  /**
+   * Optional active model input used for the turn, enabling tools to perform secondary completions.
+   */
+  readonly model?: HernexModelInput | undefined;
+
+  /**
+   * Optional API key used for the turn, enabling tools to perform secondary completions.
+   */
+  readonly apiKey?: string | undefined;
+
+  /**
+   * Optional base URL used for the turn, enabling tools to perform secondary completions.
+   */
+  readonly baseUrl?: string | undefined;
 
   /**
    * Optional callback invoked by tools when a checkpoint snapshot is created.

@@ -55,6 +55,8 @@ export {
   TaskManager,
   GlobTool,
   GrepTool,
+  WebFetchTool,
+  createWebFetchTool,
   readFileInputSchema,
   writeFileInputSchema,
   editFileInputSchema,
@@ -62,11 +64,13 @@ export {
   taskManagerInputSchema,
   globInputSchema,
   grepInputSchema,
+  webFetchInputSchema,
   readFileDescription,
   writeFileDescription,
   editFileDescription,
   bashDescription,
   taskManagerDescription,
+  webFetchDescription,
   defaultRetentionTtlMs,
   defaultMaxRetainedTasks,
 } from "./tools/index.js";
@@ -91,6 +95,9 @@ export type {
   GlobOutput,
   GrepOutput,
   GrepMatch,
+  WebFetchInput,
+  WebFetchOutput,
+  WebFetchToolOptions,
 } from "./tools/index.js";
 
 // Threads & Stores

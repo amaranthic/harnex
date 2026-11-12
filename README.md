@@ -58,7 +58,7 @@ for await (const event of engine.runTurn("Check working directory status")) {
 - [Agent Engine & Turn Lifecycle](docs/agent.md)
 - [Outward Streaming Events](docs/events.md)
 - [Inward Interception Hooks](docs/hooks.md)
-- [Tool Registry & Process Tools](docs/tools.md)
+- [Tool Registry & Built-In Tools](docs/tools.md)
 
 ---
 

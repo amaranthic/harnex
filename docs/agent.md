@@ -94,6 +94,8 @@ Calling `engine.runTurn(...)` returns an `AsyncGenerator<AgentEvent, void, void>
 
 **Lazy Reservation**: Turn reservation and validation occur on the first `.next()` call (e.g. when entering `for await...of`). A generator created but never consumed does not increment `currentTurn` or lock the engine.
 
+**1-Based Turn Numbering**: Turn indexing strictly follows a 1-based convention (`1, 2, 3, ...`). Both `engine.currentTurn` and event `turnIndex` are always $\ge 1$. Turn index `0` is invalid.
+
 ```typescript
 const turnStream = engine.runTurn(
   "Inspect package.json and summarize dependencies.",

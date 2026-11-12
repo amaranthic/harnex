@@ -59,3 +59,13 @@ export const grepDescription =
   "Searches file contents across the workspace matching a regular expression pattern. " +
   "Supports single-file targeting via filePath or directory scoping via directoryPath with optional file glob filtering, " +
   "and case-insensitive matching. Returns matching relative file paths with line numbers and line content.";
+
+/**
+ * System prompt description for WebFetchTool.
+ */
+export const webFetchDescription =
+  "Fetches web page content from a specified HTTP or HTTPS URL and converts it into clean Markdown. " +
+  "Accepts an optional 'prompt' parameter to run a focused extraction using the active model, returning " +
+  "only the targeted information instead of the full page. " +
+  "Includes SSRF protection (blocks private, loopback, and local network addresses), cross-host redirect detection, " +
+  "and a 15-minute in-memory response cache.";

@@ -12,6 +12,7 @@ import { GlobTool } from "./GlobTool.js";
 import { GrepTool } from "./GrepTool.js";
 import { ReadFileTool } from "./ReadFileTool.js";
 import { TaskManagerTool } from "./TaskManagerTool.js";
+import { WebFetchTool } from "./WebFetchTool.js";
 import { WriteFileTool } from "./WriteFileTool.js";
 
 /**
@@ -19,8 +20,8 @@ import { WriteFileTool } from "./WriteFileTool.js";
  */
 export interface ToolRegistryOptions {
   /**
-   * Whether to automatically register the 7 standard built-in tools
-   * (readFile, writeFile, editFile, bash, taskManager, glob, grep). Defaults to true.
+   * Whether to automatically register the 8 standard built-in tools
+   * (readFile, writeFile, editFile, bash, taskManager, glob, grep, webFetch). Defaults to true.
    */
   readonly includeDefaults?: boolean;
 }
@@ -133,7 +134,7 @@ export class ToolRegistry {
   }
 
   /**
-   * Populates the registry with the default suite of 7 core agent tools.
+   * Populates the registry with the default suite of 8 core agent tools.
    */
   private registerDefaultTools(): void {
     this.register(new ReadFileTool());
@@ -143,5 +144,6 @@ export class ToolRegistry {
     this.register(new TaskManagerTool());
     this.register(new GlobTool());
     this.register(new GrepTool());
+    this.register(new WebFetchTool());
   }
 }

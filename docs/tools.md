@@ -1,6 +1,6 @@
 # Tool Registry & Built-In Tools
 
-Hernex provides a structured tool registry and 7 built-in tools for workspace file manipulation, shell command execution, and background process management.
+Hernex provides a structured tool registry and 8 built-in tools for workspace file manipulation, shell command execution, background process management, and safe web content retrieval.
 
 ---
 
@@ -59,7 +59,8 @@ All built-in file tools ([`ReadFileTool`](../src/tools/ReadFileTool.ts), [`Write
 
 - Paths are verified to reside strictly within `workingDirectory`.
 - Symlink traversal outside the workspace boundary is detected via `lstat` and strictly denied.
-- Writes and edits use atomic sibling temporary file replacement (`atomicWriteFile`) to guarantee zero torn writes.
+- Writes and edits use atomic sibling temporary file replacement (`atomicWriteFile`) to guarantee zero torn writes while preserving POSIX file permissions.
+- Concurrent file operations acquire exclusive multi-file locks (`withWorkspaceFileLock`) ordered lexicographically to eliminate race conditions and deadlocks across threads.
 
 ### 3.1 File Discovery (`GlobTool`)
 
@@ -115,3 +116,31 @@ When checkpointing is enabled (`checkpoint: true`), `WriteFileTool` and `EditFil
 - Pre-mutation state is recorded before writing.
 - Post-mutation state is updated after successful writes.
 - If an uncommitted external modification creates a conflict, `restoreCheckpoint` rejects the rollback cleanly unless `force: true` is passed.
+- On multi-file restore failure, reverse-order compensation restores mutated files to their pre-rollback baseline and throws `HernexCheckpointRestoreError` containing `compensatedPaths` and `unrecoveredPaths`.
+
+---
+
+## 6. Safe Web Retrieval: `WebFetchTool`
+
+[`WebFetchTool`](../src/tools/WebFetchTool.ts) (`webFetch`) retrieves external web pages, converts HTML into clean Markdown via Turndown, and provides optional model-driven targeted extraction using Hernex's `generateText` runtime.
+
+### 6.1 Security & SSRF Protection
+
+All outbound requests pass through [`ssrfGuard`](../src/tools/internal/ssrfGuard.ts) powered by `ipaddr.js`:
+
+- **IP Filtering**: Strictly rejects loopback (`127.0.0.1`, `::1`), private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), carrier-grade NAT (`100.64.0.0/10`), link-local / IMDS addresses (`169.254.169.254`, `fe80::/10`), and IPv6 unique local (`fc00::/7`).
+- **Host Restrictions**: Blocks single-label hostnames (e.g. `corpnas`, `router`), local domain suffixes (`.local`, `.internal`, `.localhost`, `.lan`), cloud metadata hostnames (`metadata.google.internal`, `instance-data`), and embedded basic auth credentials (`https://user:pass@...`).
+- **Cross-Host Redirect Halts**: Follows same-host and `www.` redirects up to 5 hops, but immediately halts on cross-host redirects and surfaces a notice so the agent retains full oversight over domain transitions.
+
+### 6.2 Caching & Content Conversion
+
+- **15-Minute Response Cache**: Successful HTTP responses are cached in memory for 15 minutes (`cacheTtlMs: 900,000`). Subsequent queries for the same URL return cached Markdown (`cached: true`) without redundant network latency.
+- **HTML to Markdown**: Converts HTML via `TurndownService`, stripping `<script>`, `<style>`, `<noscript>`, `<svg>`, and `<iframe>` elements while preserving headings, bolding, lists, and markdown links.
+- **JSON & Text**: Formats `application/json` responses into syntax-highlighted code blocks, and returns plain text as-is.
+
+### 6.3 Parameters & Usage
+
+- `url` (required): Valid HTTP or HTTPS URL to fetch.
+- `prompt` (optional): Focused question or instruction to extract specific answers from the webpage content.
+  - **Omitted `prompt`**: Returns full page Markdown directly with zero extra token latency.
+  - **Provided `prompt`**: Executes a single-turn `generateText` call using the active model, credentials, and abort signal passed from the turn execution context, with up to 5 retry attempts and exponential backoff on transient errors.

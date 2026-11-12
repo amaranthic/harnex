@@ -15,3 +15,4 @@ export * from "./TaskManagerTool.js";
 export * from "../tasks/index.js";
 export * from "./GlobTool.js";
 export * from "./GrepTool.js";
+export * from "./WebFetchTool.js";

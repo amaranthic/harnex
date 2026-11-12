@@ -57,11 +57,14 @@
     "@ai-sdk/togetherai": "3.0.76",
     "@ai-sdk/xai": "5.0.27",
     "ai": "7.0.148",
+    "ipaddr.js": "2.5.0",
+    "turndown": "7.2.5",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",
     "@types/node": "26.6.5",
+    "@types/turndown": "5.0.6",
     "typescript": "7.0.2"
   }
 }
