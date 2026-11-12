@@ -8,3 +8,4 @@ export * from "./atomicFile.js";
 export * from "./lock.js";
 export * from "./jsonl.js";
 export * from "./valueCodec.js";
+export * from "./workspaceLock.js";

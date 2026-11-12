@@ -12,6 +12,7 @@ import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
 import { resolvePathWithinWorkspace } from "./internal/pathGuard.js";
 import { atomicWriteFile } from "../storage/atomicFile.js";
+import { withWorkspaceFileLock } from "../storage/workspaceLock.js";
 import { editFileDescription } from "./prompts.js";
 
 /**
@@ -77,98 +78,108 @@ export class EditFileTool implements AgentTool<
       );
     }
 
-    const fullPath = resolvePathWithinWorkspace(
-      parameters.filePath,
+    return await withWorkspaceFileLock(
       context.workingDirectory,
-    );
-
-    if (!existsSync(fullPath)) {
-      throw new Error(`File not found: ${parameters.filePath}`);
-    }
-
-    const rawContent = await readFile(fullPath, "utf-8");
-
-    if (!rawContent.includes(parameters.oldString)) {
-      throw new Error(
-        `String to replace not found in file '${parameters.filePath}'. ` +
-          "Ensure whitespace, indentation, and newlines match the file exactly.",
-      );
-    }
-
-    const occurrences = rawContent.split(parameters.oldString).length - 1;
-
-    if (occurrences > 1 && !parameters.replaceAll) {
-      throw new Error(
-        `Found ${occurrences} matches of the string to replace, but replaceAll is false. ` +
-          "To replace all occurrences, set replaceAll to true. " +
-          "To replace only one occurrence, provide more surrounding context to uniquely identify the instance.",
-      );
-    }
-
-    const relativeFilePath = path.relative(context.workingDirectory, fullPath);
-    let checkpointId: string | undefined;
-
-    // 1. Pre-mutation checkpoint capture
-    if (context.isCheckpointEnabled && context.checkpointStore) {
-      try {
-        const cpRecord = await context.checkpointStore.createCheckpoint(
-          context.threadId,
-          {
-            workingDirectory: context.workingDirectory,
-            turnIndex: context.turnIndex,
-            label: `editFile: ${parameters.filePath}`,
-            files: [relativeFilePath],
-            source: { toolName: EditFileTool.toolName },
-          },
-        );
-        checkpointId = cpRecord.id;
-      } catch (error) {
-        throw new Error(
-          `Failed to record pre-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-    // Function replacer avoids interpreting $&, $1, $$, etc. as special substitution patterns
-    const replacer = (): string => parameters.newString;
-    const updatedContent = parameters.replaceAll
-      ? rawContent.replaceAll(parameters.oldString, replacer)
-      : rawContent.replace(parameters.oldString, replacer);
-
-    const buffer = Buffer.from(updatedContent, "utf-8");
-
-    // 2. Perform file write atomically
-    await atomicWriteFile(fullPath, buffer);
-
-    // 3. Post-mutation checkpoint finalization
-    if (
-      context.isCheckpointEnabled &&
-      context.checkpointStore &&
-      checkpointId
-    ) {
-      try {
-        const updatedRecord = await context.checkpointStore.updateCheckpoint(
-          context.threadId,
-          checkpointId,
+      parameters.filePath,
+      async () => {
+        const fullPath = resolvePathWithinWorkspace(
+          parameters.filePath,
           context.workingDirectory,
         );
-        context.onCheckpointCreated?.({
-          checkpointId: updatedRecord.id,
-          sequence: updatedRecord.sequence,
-          label: updatedRecord.label,
-          filesTouched: [relativeFilePath],
-        });
-      } catch (error) {
-        throw new Error(
-          `Failed to record post-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
 
-    return {
-      filePath: parameters.filePath,
-      replacementsApplied: parameters.replaceAll ? occurrences : 1,
-      bytesWritten: buffer.length,
-    };
+        if (!existsSync(fullPath)) {
+          throw new Error(`File not found: ${parameters.filePath}`);
+        }
+
+        const rawContent = await readFile(fullPath, "utf-8");
+
+        if (!rawContent.includes(parameters.oldString)) {
+          throw new Error(
+            `String to replace not found in file '${parameters.filePath}'. ` +
+              "Ensure whitespace, indentation, and newlines match the file exactly.",
+          );
+        }
+
+        const occurrences = rawContent.split(parameters.oldString).length - 1;
+
+        if (occurrences > 1 && !parameters.replaceAll) {
+          throw new Error(
+            `Found ${occurrences} matches of the string to replace, but replaceAll is false. ` +
+              "To replace all occurrences, set replaceAll to true. " +
+              "To replace only one occurrence, provide more surrounding context to uniquely identify the instance.",
+          );
+        }
+
+        const relativeFilePath = path.relative(
+          context.workingDirectory,
+          fullPath,
+        );
+        let checkpointId: string | undefined;
+
+        // 1. Pre-mutation checkpoint capture
+        if (context.isCheckpointEnabled && context.checkpointStore) {
+          try {
+            const cpRecord = await context.checkpointStore.createCheckpoint(
+              context.threadId,
+              {
+                workingDirectory: context.workingDirectory,
+                turnIndex: context.turnIndex,
+                label: `editFile: ${parameters.filePath}`,
+                files: [relativeFilePath],
+                source: { toolName: EditFileTool.toolName },
+              },
+            );
+            checkpointId = cpRecord.id;
+          } catch (error) {
+            throw new Error(
+              `Failed to record pre-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        // Function replacer avoids interpreting $&, $1, $$, etc. as special substitution patterns
+        const replacer = (): string => parameters.newString;
+        const updatedContent = parameters.replaceAll
+          ? rawContent.replaceAll(parameters.oldString, replacer)
+          : rawContent.replace(parameters.oldString, replacer);
+
+        const buffer = Buffer.from(updatedContent, "utf-8");
+
+        // 2. Perform file write atomically
+        await atomicWriteFile(fullPath, buffer);
+
+        // 3. Post-mutation checkpoint finalization
+        if (
+          context.isCheckpointEnabled &&
+          context.checkpointStore &&
+          checkpointId
+        ) {
+          try {
+            const updatedRecord =
+              await context.checkpointStore.updateCheckpoint(
+                context.threadId,
+                checkpointId,
+                context.workingDirectory,
+              );
+            context.onCheckpointCreated?.({
+              checkpointId: updatedRecord.id,
+              sequence: updatedRecord.sequence,
+              label: updatedRecord.label,
+              filesTouched: [relativeFilePath],
+            });
+          } catch (error) {
+            throw new Error(
+              `Failed to record post-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        return {
+          filePath: parameters.filePath,
+          replacementsApplied: parameters.replaceAll ? occurrences : 1,
+          bytesWritten: buffer.length,
+        };
+      },
+    );
   }
 }

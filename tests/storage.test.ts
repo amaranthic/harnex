@@ -10,6 +10,8 @@ import {
   readdirSync,
   rmSync,
   writeFileSync,
+  chmodSync,
+  statSync,
 } from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,6 +20,8 @@ import {
   resolveHomeDirectory,
   atomicWriteFile,
   withFileLock,
+  withWorkspaceFileLock,
+  getWorkspaceLockPath,
   appendJsonl,
   readJsonl,
   encodeValue,
@@ -111,6 +115,33 @@ describe("storage primitives", () => {
         f.startsWith("replace.txt.tmp."),
       );
       expect(lingeringTemps).toHaveLength(0);
+    });
+
+    it("preserves POSIX file permissions when replacing an existing file and honors explicit mode", async () => {
+      // 1. Existing executable file (0o750)
+      const scriptPath = path.join(testDir, "script.sh");
+      writeFileSync(scriptPath, "#!/bin/bash\necho 1");
+      chmodSync(scriptPath, 0o750);
+      expect(statSync(scriptPath).mode & 0o777).toBe(0o750);
+
+      await atomicWriteFile(scriptPath, "#!/bin/bash\necho 2");
+      expect(readFileSync(scriptPath, "utf-8")).toBe("#!/bin/bash\necho 2");
+      expect(statSync(scriptPath).mode & 0o777).toBe(0o750);
+
+      // 2. Existing restricted file (0o600)
+      const secretPath = path.join(testDir, "secret.key");
+      writeFileSync(secretPath, "old-secret");
+      chmodSync(secretPath, 0o600);
+      expect(statSync(secretPath).mode & 0o777).toBe(0o600);
+
+      await atomicWriteFile(secretPath, "new-secret");
+      expect(readFileSync(secretPath, "utf-8")).toBe("new-secret");
+      expect(statSync(secretPath).mode & 0o777).toBe(0o600);
+
+      // 3. Explicit mode override
+      const overridePath = path.join(testDir, "override.txt");
+      await atomicWriteFile(overridePath, "custom-mode", { mode: 0o700 });
+      expect(statSync(overridePath).mode & 0o777).toBe(0o700);
     });
 
     it("handles concurrent writes with unique cryptographically random sibling temp names", async () => {
@@ -214,12 +245,19 @@ describe("storage primitives", () => {
     it("serializes concurrent lockers on the same lock file", async () => {
       const lockFile = path.join(testDir, "serial.lock");
       const order: number[] = [];
+      let resolveLocker1Acquired: () => void;
+      const locker1AcquiredPromise = new Promise<void>((resolve) => {
+        resolveLocker1Acquired = resolve;
+      });
 
       const locker1 = withFileLock(lockFile, async () => {
+        resolveLocker1Acquired();
         await new Promise((resolve) => setTimeout(resolve, 50));
         order.push(1);
         return 1;
       });
+
+      await locker1AcquiredPromise;
 
       const locker2 = withFileLock(lockFile, async () => {
         order.push(2);
@@ -357,6 +395,92 @@ describe("storage primitives", () => {
       } finally {
         unlinkSpy.mockRestore();
       }
+    });
+  });
+
+  describe("withWorkspaceFileLock", () => {
+    it("serializes concurrent operations targeting the same workspace file", async () => {
+      const workspaceDir = path.join(testDir, "ws_lock");
+      mkdirSync(workspaceDir, { recursive: true });
+      const targetFile = "shared.txt";
+      const order: number[] = [];
+
+      let resolveOp1Acquired: () => void;
+      const op1AcquiredPromise = new Promise<void>((resolve) => {
+        resolveOp1Acquired = resolve;
+      });
+
+      const op1 = withWorkspaceFileLock(
+        workspaceDir,
+        targetFile,
+        async () => {
+          resolveOp1Acquired();
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          order.push(1);
+          return 1;
+        },
+        { homeDirectory: testDir },
+      );
+
+      await op1AcquiredPromise;
+
+      const op2 = withWorkspaceFileLock(
+        workspaceDir,
+        targetFile,
+        async () => {
+          order.push(2);
+          return 2;
+        },
+        { homeDirectory: testDir },
+      );
+
+      const results = await Promise.all([op1, op2]);
+      expect(results).toEqual([1, 2]);
+      expect(order).toEqual([1, 2]);
+    });
+
+    it("acquires multi-file locks in deterministic lexicographical order without deadlocking", async () => {
+      const workspaceDir = path.join(testDir, "ws_multi");
+      mkdirSync(workspaceDir, { recursive: true });
+
+      // Thread A targets [fileB, fileA]
+      // Thread B targets [fileA, fileB]
+      // Because withWorkspaceFileLock sorts files lexicographically, both acquire fileA then fileB
+      const order: string[] = [];
+
+      const opA = withWorkspaceFileLock(
+        workspaceDir,
+        ["fileB.txt", "fileA.txt"],
+        async () => {
+          order.push("A");
+          return "A";
+        },
+        { homeDirectory: testDir },
+      );
+
+      const opB = withWorkspaceFileLock(
+        workspaceDir,
+        ["fileA.txt", "fileB.txt"],
+        async () => {
+          order.push("B");
+          return "B";
+        },
+        { homeDirectory: testDir },
+      );
+
+      const results = await Promise.all([opA, opB]);
+      expect(results).toHaveLength(2);
+      expect(order).toHaveLength(2);
+
+      // Verify lock file locations are outside workspaceDir inside homeDirectory
+      const lockPathA = getWorkspaceLockPath(
+        workspaceDir,
+        "fileA.txt",
+        testDir,
+      );
+      expect(lockPathA.startsWith(testDir)).toBe(true);
+      expect(lockPathA.includes(workspaceDir)).toBe(false);
+      expect(existsSync(lockPathA)).toBe(false); // cleaned up on release
     });
   });
 

@@ -11,6 +11,7 @@ import type { AgentTool } from "./AgentTool.js";
 import type { ToolExecutionContext } from "./ToolExecutionContext.js";
 import { resolvePathWithinWorkspace } from "./internal/pathGuard.js";
 import { atomicWriteFile } from "../storage/atomicFile.js";
+import { withWorkspaceFileLock } from "../storage/workspaceLock.js";
 import { writeFileDescription } from "./prompts.js";
 
 /**
@@ -60,73 +61,83 @@ export class WriteFileTool implements AgentTool<
     parameters: z.infer<typeof writeFileInputSchema>,
     context: ToolExecutionContext,
   ): Promise<WriteFileOutput> {
-    const fullPath = resolvePathWithinWorkspace(
-      parameters.filePath,
+    return await withWorkspaceFileLock(
       context.workingDirectory,
-    );
-    const fileExisted = existsSync(fullPath);
-    const relativeFilePath = path.relative(context.workingDirectory, fullPath);
-
-    let checkpointId: string | undefined;
-
-    // 1. Pre-mutation checkpoint capture
-    if (context.isCheckpointEnabled && context.checkpointStore) {
-      try {
-        const cpRecord = await context.checkpointStore.createCheckpoint(
-          context.threadId,
-          {
-            workingDirectory: context.workingDirectory,
-            turnIndex: context.turnIndex,
-            label: `writeFile: ${parameters.filePath}`,
-            files: [relativeFilePath],
-            source: { toolName: WriteFileTool.toolName },
-          },
-        );
-        checkpointId = cpRecord.id;
-      } catch (error) {
-        throw new Error(
-          `Failed to record pre-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-    const buffer = Buffer.from(parameters.content, "utf-8");
-
-    // 2. Perform file write atomically
-    await atomicWriteFile(fullPath, buffer);
-
-    // 3. Post-mutation checkpoint finalization
-    if (
-      context.isCheckpointEnabled &&
-      context.checkpointStore &&
-      checkpointId
-    ) {
-      try {
-        const updatedRecord = await context.checkpointStore.updateCheckpoint(
-          context.threadId,
-          checkpointId,
+      parameters.filePath,
+      async () => {
+        const fullPath = resolvePathWithinWorkspace(
+          parameters.filePath,
           context.workingDirectory,
         );
-        context.onCheckpointCreated?.({
-          checkpointId: updatedRecord.id,
-          sequence: updatedRecord.sequence,
-          label: updatedRecord.label,
-          filesTouched: [relativeFilePath],
-        });
-      } catch (error) {
-        throw new Error(
-          `Failed to record post-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
+        const fileExisted = existsSync(fullPath);
+        const relativeFilePath = path.relative(
+          context.workingDirectory,
+          fullPath,
         );
-      }
-    }
 
-    const lineCount = parameters.content.split("\n").length;
+        let checkpointId: string | undefined;
 
-    return {
-      filePath: parameters.filePath,
-      bytesWritten: buffer.length,
-      linesWritten: lineCount,
-      status: fileExisted ? "overwritten" : "created",
-    };
+        // 1. Pre-mutation checkpoint capture
+        if (context.isCheckpointEnabled && context.checkpointStore) {
+          try {
+            const cpRecord = await context.checkpointStore.createCheckpoint(
+              context.threadId,
+              {
+                workingDirectory: context.workingDirectory,
+                turnIndex: context.turnIndex,
+                label: `writeFile: ${parameters.filePath}`,
+                files: [relativeFilePath],
+                source: { toolName: WriteFileTool.toolName },
+              },
+            );
+            checkpointId = cpRecord.id;
+          } catch (error) {
+            throw new Error(
+              `Failed to record pre-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        const buffer = Buffer.from(parameters.content, "utf-8");
+
+        // 2. Perform file write atomically
+        await atomicWriteFile(fullPath, buffer);
+
+        // 3. Post-mutation checkpoint finalization
+        if (
+          context.isCheckpointEnabled &&
+          context.checkpointStore &&
+          checkpointId
+        ) {
+          try {
+            const updatedRecord =
+              await context.checkpointStore.updateCheckpoint(
+                context.threadId,
+                checkpointId,
+                context.workingDirectory,
+              );
+            context.onCheckpointCreated?.({
+              checkpointId: updatedRecord.id,
+              sequence: updatedRecord.sequence,
+              label: updatedRecord.label,
+              filesTouched: [relativeFilePath],
+            });
+          } catch (error) {
+            throw new Error(
+              `Failed to record post-mutation checkpoint for '${parameters.filePath}': ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        const lineCount = parameters.content.split("\n").length;
+
+        return {
+          filePath: parameters.filePath,
+          bytesWritten: buffer.length,
+          linesWritten: lineCount,
+          status: fileExisted ? "overwritten" : "created",
+        };
+      },
+    );
   }
 }

@@ -8,7 +8,7 @@ import path from "node:path";
 
 export interface ResolveHomeDirectoryOptions {
   /** Explicit override for the storage home directory. */
-  readonly homeDirectory?: string;
+  readonly homeDirectory?: string | undefined;
 }
 
 /**

@@ -117,6 +117,10 @@ export type {
 
 // Checkpoints & Content-Addressed Delta Storage
 export { FileCheckpointStore } from "./checkpoints/index.js";
+export {
+  withWorkspaceFileLock,
+  getWorkspaceLockPath,
+} from "./storage/workspaceLock.js";
 
 export type {
   CheckpointFileRecord,
@@ -177,4 +181,7 @@ export {
   HernexStoreError,
   HernexLockError,
   HernexCheckpointConflictError,
+  HernexCheckpointRestoreError,
 } from "./errors.js";
+
+export type { HernexCheckpointRestoreErrorOptions } from "./errors.js";

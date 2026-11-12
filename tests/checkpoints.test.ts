@@ -2,7 +2,7 @@
  * @fileoverview Test suite for FileCheckpointStore, snapshot verification, and rollback integrity.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -12,9 +12,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import * as atomicFileModule from "../src/storage/atomicFile.js";
 import {
   FileCheckpointStore,
   HernexCheckpointConflictError,
+  HernexCheckpointRestoreError,
   HernexStoreError,
 } from "../src/index.js";
 
@@ -288,5 +290,127 @@ describe("FileCheckpointStore", () => {
     );
     expect(restoreRes.filesRestored).toBe(1);
     expect(readFileSync(path.join(workspaceDir, file2), "utf-8")).toBe(content);
+  });
+
+  it("compensates already-applied file restorations and throws HernexCheckpointRestoreError when a subsequent file restore fails", async () => {
+    const threadId = "thread-restore-compensation";
+    const fileA = "fileA.txt";
+    const fileB = "fileB.txt";
+    const pathA = path.join(workspaceDir, fileA);
+    const pathB = path.join(workspaceDir, fileB);
+
+    writeFileSync(pathA, "alpha-v1");
+    writeFileSync(pathB, "beta-v1");
+
+    const cp = await store.createCheckpoint(threadId, {
+      workingDirectory: workspaceDir,
+      turnIndex: 1,
+      label: "Initial multi-file snapshot",
+      files: [fileA, fileB],
+    });
+
+    // Mutate both files to v2
+    writeFileSync(pathA, "alpha-v2");
+    writeFileSync(pathB, "beta-v2");
+    await store.updateCheckpoint(threadId, cp.id, workspaceDir);
+
+    // Spy on atomicWriteFile to fail on fileB restore, but allow fileA compensation
+    const originalAtomicWrite = atomicFileModule.atomicWriteFile;
+    const atomicSpy = spyOn(
+      atomicFileModule,
+      "atomicWriteFile",
+    ).mockImplementation(async (filePath, content, options) => {
+      if (path.resolve(filePath) === path.resolve(pathB)) {
+        throw new Error("simulated disk exhaustion writing fileB");
+      }
+      return await originalAtomicWrite(filePath, content, options);
+    });
+
+    let caughtError: unknown = null;
+    try {
+      await store.restoreCheckpoint(threadId, cp.id, workspaceDir, {
+        force: true,
+      });
+    } catch (error) {
+      caughtError = error;
+    } finally {
+      atomicSpy.mockRestore();
+    }
+
+    expect(caughtError).toBeInstanceOf(HernexCheckpointRestoreError);
+    const restoreError = caughtError as HernexCheckpointRestoreError;
+
+    expect(restoreError.checkpointId).toBe(cp.id);
+    expect(restoreError.committedPaths).toContain(fileA);
+    expect(restoreError.compensatedPaths).toContain(fileA);
+    expect(restoreError.unrecoveredPaths).toHaveLength(0);
+    expect(restoreError.isCompensated).toBe(true);
+    expect(restoreError.errors).toHaveLength(1);
+    expect(restoreError.originalError.message).toContain("fileB");
+
+    // fileA must have been compensated back to its pre-restore state ("alpha-v2")
+    expect(readFileSync(pathA, "utf-8")).toBe("alpha-v2");
+  });
+
+  it("reports partial unrecovered paths and preserves compensation error when rollback compensation fails", async () => {
+    const threadId = "thread-unrecovered-compensation";
+    const fileA = "fileA.txt";
+    const fileB = "fileB.txt";
+    const pathA = path.join(workspaceDir, fileA);
+    const pathB = path.join(workspaceDir, fileB);
+
+    writeFileSync(pathA, "alpha-v1");
+    writeFileSync(pathB, "beta-v1");
+
+    const cp = await store.createCheckpoint(threadId, {
+      workingDirectory: workspaceDir,
+      turnIndex: 1,
+      label: "Initial snapshot",
+      files: [fileA, fileB],
+    });
+
+    writeFileSync(pathA, "alpha-v2");
+    writeFileSync(pathB, "beta-v2");
+    await store.updateCheckpoint(threadId, cp.id, workspaceDir);
+
+    let isCompensating = false;
+    const originalAtomicWrite = atomicFileModule.atomicWriteFile;
+    const atomicSpy = spyOn(
+      atomicFileModule,
+      "atomicWriteFile",
+    ).mockImplementation(async (filePath, content, options) => {
+      if (path.resolve(filePath) === path.resolve(pathB)) {
+        isCompensating = true;
+        throw new Error("simulated disk exhaustion writing fileB");
+      }
+      if (isCompensating && path.resolve(filePath) === path.resolve(pathA)) {
+        throw new Error(
+          "simulated I/O failure during fileA compensation rollback",
+        );
+      }
+      return await originalAtomicWrite(filePath, content, options);
+    });
+
+    let caughtError: unknown = null;
+    try {
+      await store.restoreCheckpoint(threadId, cp.id, workspaceDir, {
+        force: true,
+      });
+    } catch (error) {
+      caughtError = error;
+    } finally {
+      atomicSpy.mockRestore();
+    }
+
+    expect(caughtError).toBeInstanceOf(HernexCheckpointRestoreError);
+    const restoreError = caughtError as HernexCheckpointRestoreError;
+
+    expect(restoreError.isCompensated).toBe(false);
+    expect(restoreError.committedPaths).toContain(fileA);
+    expect(restoreError.unrecoveredPaths).toContain(fileA);
+    expect(restoreError.compensationError).toBeDefined();
+    expect(restoreError.compensationError?.message).toContain(
+      "fileA compensation rollback",
+    );
   });
 });

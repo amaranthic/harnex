@@ -220,3 +220,72 @@ export class HernexCheckpointConflictError extends Error {
     this.name = "HernexCheckpointConflictError";
   }
 }
+
+/**
+ * Options for instantiating a HernexCheckpointRestoreError.
+ */
+export interface HernexCheckpointRestoreErrorOptions {
+  /** The identifier of the checkpoint that failed to restore. */
+  readonly checkpointId: string;
+  /** Detailed error message describing the failure and compensation result. */
+  readonly message: string;
+  /** Relative paths in the workspace that were committed prior to the failure. */
+  readonly committedPaths: readonly string[];
+  /** Relative paths successfully compensated back to their pre-call states. */
+  readonly compensatedPaths: readonly string[];
+  /** Relative paths that failed compensation or remain in a mixed state. */
+  readonly unrecoveredPaths: readonly string[];
+  /** Whether all committed mutations were successfully compensated. */
+  readonly isCompensated: boolean;
+  /** The underlying primary error that interrupted the restore. */
+  readonly originalError: Error;
+  /** Secondary error encountered if compensation failed. */
+  readonly compensationError?: Error | undefined;
+}
+
+/**
+ * Error thrown when a multi-file checkpoint restore operation fails.
+ *
+ * Provides a structured partial-failure and compensation report detailing which
+ * workspace paths were committed before the failure, which were compensated,
+ * and which remain unrecovered.
+ */
+export class HernexCheckpointRestoreError extends Error {
+  /** The identifier of the checkpoint that failed to restore. */
+  readonly checkpointId: string;
+  /** Relative paths in the workspace that were committed prior to the failure. */
+  readonly committedPaths: readonly string[];
+  /** Relative paths successfully compensated back to their pre-call states. */
+  readonly compensatedPaths: readonly string[];
+  /** Relative paths that failed compensation or remain in a mixed state. */
+  readonly unrecoveredPaths: readonly string[];
+  /** Whether all committed mutations were successfully compensated. */
+  readonly isCompensated: boolean;
+  /** The underlying primary error that interrupted the restore. */
+  readonly originalError: Error;
+  /** Secondary error encountered if compensation failed. */
+  readonly compensationError?: Error | undefined;
+  /** Compatibility array of errors preserving original and compensation errors. */
+  readonly errors: readonly Error[];
+
+  /**
+   * Creates an instance of HernexCheckpointRestoreError.
+   *
+   * @param options - Structured restore error parameters.
+   */
+  constructor(options: HernexCheckpointRestoreErrorOptions) {
+    super(options.message);
+    this.name = "HernexCheckpointRestoreError";
+    this.checkpointId = options.checkpointId;
+    this.committedPaths = options.committedPaths;
+    this.compensatedPaths = options.compensatedPaths;
+    this.unrecoveredPaths = options.unrecoveredPaths;
+    this.isCompensated = options.isCompensated;
+    this.originalError = options.originalError;
+    this.compensationError = options.compensationError;
+    this.errors = [
+      options.originalError,
+      ...(options.compensationError ? [options.compensationError] : []),
+    ];
+  }
+}

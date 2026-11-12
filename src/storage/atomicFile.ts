@@ -5,7 +5,14 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -13,7 +20,7 @@ import path from "node:path";
  */
 export interface AtomicWriteOptions {
   /** File mode permission bits. */
-  readonly mode?: number;
+  readonly mode?: number | undefined;
 }
 
 /**
@@ -47,11 +54,38 @@ export async function atomicWriteFile(
   const buffer =
     typeof content === "string" ? Buffer.from(content, "utf-8") : content;
 
+  // Determine effective file mode:
+  // 1. Explicit caller-provided mode
+  // 2. Preserved mode from existing regular file (without following symlinks)
+  // 3. Fallback to process default (umask-derived)
+  let effectiveMode = options?.mode;
+  if (effectiveMode === undefined) {
+    try {
+      const stats = await lstat(absolutePath);
+      if (stats.isFile()) {
+        effectiveMode = stats.mode & 0o7777;
+      }
+    } catch (lstatError) {
+      if ((lstatError as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        throw lstatError;
+      }
+    }
+  }
+
   try {
     await writeFile(tempPath, buffer, {
-      mode: options?.mode,
+      mode: effectiveMode,
       flag: "wx",
     });
+
+    if (effectiveMode !== undefined) {
+      try {
+        await chmod(tempPath, effectiveMode);
+      } catch {
+        // Best-effort chmod for platforms or filesystems that do not support permission bits
+      }
+    }
+
     await rename(tempPath, absolutePath);
     return buffer.length;
   } catch (primaryError) {

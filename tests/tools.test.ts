@@ -338,6 +338,76 @@ describe("Built-in File & Shell Tools", () => {
     expect(existsSync(join(testWorkspace, "doc.txt"))).toBe(false);
   });
 
+  it("serializes concurrent edits from separate threads to the same file without lost updates or corrupted checkpoints", async () => {
+    const checkpointStore = new FileCheckpointStore({
+      homeDirectory: testWorkspace,
+    });
+    const writeTool = new WriteFileTool();
+    const editTool = new EditFileTool();
+
+    const targetFile = "concurrent_edit.txt";
+    const initialContent = "counterA = 0;\ncounterB = 0;\n";
+
+    await writeTool.execute(
+      { filePath: targetFile, content: initialContent },
+      {
+        threadId: "setup-thread",
+        toolCallId: "call-setup",
+        workingDirectory: testWorkspace,
+        checkpointStore,
+        isCheckpointEnabled: true,
+      },
+    );
+
+    const contextThreadA = {
+      threadId: "thread-A",
+      toolCallId: "call-A",
+      workingDirectory: testWorkspace,
+      checkpointStore,
+      isCheckpointEnabled: true,
+    };
+
+    const contextThreadB = {
+      threadId: "thread-B",
+      toolCallId: "call-B",
+      workingDirectory: testWorkspace,
+      checkpointStore,
+      isCheckpointEnabled: true,
+    };
+
+    // Concurrently edit counterA and counterB
+    const editA = editTool.execute(
+      {
+        filePath: targetFile,
+        oldString: "counterA = 0;",
+        newString: "counterA = 1;",
+      },
+      contextThreadA,
+    );
+
+    const editB = editTool.execute(
+      {
+        filePath: targetFile,
+        oldString: "counterB = 0;",
+        newString: "counterB = 1;",
+      },
+      contextThreadB,
+    );
+
+    await Promise.all([editA, editB]);
+
+    // Both edits must be present in the final file; neither was silently overwritten
+    const finalContent = readFileSync(join(testWorkspace, targetFile), "utf-8");
+    expect(finalContent).toContain("counterA = 1;");
+    expect(finalContent).toContain("counterB = 1;");
+
+    // Both threads recorded clean checkpoints
+    const cpsA = await checkpointStore.listCheckpoints("thread-A");
+    const cpsB = await checkpointStore.listCheckpoints("thread-B");
+    expect(cpsA.length).toBe(1);
+    expect(cpsB.length).toBe(1);
+  });
+
   it("executes BashTool capturing command output and exit codes", async () => {
     const bashTool = new BashTool();
     const taskManager = new TaskManager({

@@ -5,15 +5,20 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, unlink } from "node:fs/promises";
+import { lstat, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { HernexCheckpointConflictError, HernexStoreError } from "../errors.js";
+import {
+  HernexCheckpointConflictError,
+  HernexCheckpointRestoreError,
+  HernexStoreError,
+} from "../errors.js";
 import { atomicWriteFile } from "../storage/atomicFile.js";
 import {
   resolveHomeDirectory,
   type ResolveHomeDirectoryOptions,
 } from "../storage/homeDirectory.js";
 import { withFileLock } from "../storage/lock.js";
+import { withWorkspaceFileLock } from "../storage/workspaceLock.js";
 import { resolvePathWithinWorkspace } from "../tools/internal/pathGuard.js";
 import type {
   CheckpointFileRecord,
@@ -470,97 +475,202 @@ export class FileCheckpointStore implements CheckpointStore {
     this.validateId(checkpointId, "checkpoint");
     const lockPath = this.getLockPath(threadId);
 
-    return await withFileLock(lockPath, async () => {
+    // 1. Read manifest to locate checkpoint record under thread lock
+    const cp = await withFileLock(lockPath, async () => {
       const list = await this.readManifestUnlocked(threadId);
-      const cp = list.find((item) => item.id === checkpointId);
-      if (!cp) {
+      const found = list.find((item) => item.id === checkpointId);
+      if (!found) {
         throw new Error(`Checkpoint not found: "${checkpointId}"`);
       }
+      return found;
+    });
 
-      const plan = await this.planRestoreUnlocked(cp, workingDirectory);
-      if (plan.hasConflicts && !options?.force) {
-        throw new HernexCheckpointConflictError(
-          `Restore conflicts detected in checkpoint "${checkpointId}". Pass { force: true } to overwrite uncommitted external changes.`,
-        );
-      }
+    const affectedPaths = cp.files.map((f) => f.relativePath);
 
-      // Preflight: Stage all required blobs and validate paths before mutating
-      const stagedBlobs = new Map<string, Buffer>();
-      for (const file of cp.files) {
-        // Path validation
-        resolvePathWithinWorkspace(file.relativePath, workingDirectory);
+    // 2. Perform restoration under deterministic workspace mutation lock across all touched paths
+    return await withWorkspaceFileLock(
+      workingDirectory,
+      affectedPaths,
+      async () => {
+        const plan = await this.planRestoreUnlocked(cp, workingDirectory);
+        if (plan.hasConflicts && !options?.force) {
+          throw new HernexCheckpointConflictError(
+            `Restore conflicts detected in checkpoint "${checkpointId}". Pass { force: true } to overwrite uncommitted external changes.`,
+          );
+        }
 
-        const actionItem = plan.actions.find(
-          (a) => a.relativePath === file.relativePath,
-        );
-        if (
-          actionItem &&
-          (actionItem.action === "create" || actionItem.action === "modify")
-        ) {
-          if (!file.beforeHash) {
-            throw new Error(
-              `Missing beforeHash for restore action "${actionItem.action}" on path "${file.relativePath}".`,
-            );
-          }
-          if (!stagedBlobs.has(file.beforeHash)) {
-            const blobBytes = await this.readBlob(file.beforeHash);
-            stagedBlobs.set(file.beforeHash, blobBytes);
+        // Preflight: Stage all required blobs and validate paths before mutating
+        const stagedBlobs = new Map<string, Buffer>();
+        for (const file of cp.files) {
+          resolvePathWithinWorkspace(file.relativePath, workingDirectory);
+
+          const actionItem = plan.actions.find(
+            (a) => a.relativePath === file.relativePath,
+          );
+          if (
+            actionItem &&
+            (actionItem.action === "create" || actionItem.action === "modify")
+          ) {
+            if (!file.beforeHash) {
+              throw new Error(
+                `Missing beforeHash for restore action "${actionItem.action}" on path "${file.relativePath}".`,
+              );
+            }
+            if (!stagedBlobs.has(file.beforeHash)) {
+              const blobBytes = await this.readBlob(file.beforeHash);
+              stagedBlobs.set(file.beforeHash, blobBytes);
+            }
           }
         }
-      }
 
-      // Execution: perform mutations and track progress
-      let filesRestored = 0;
-      let filesDeleted = 0;
-      let conflictsOverwritten = 0;
-      const committedPaths: string[] = [];
+        // Pre-call Staging: Record current pre-restore state of each affected path for compensation
+        const preRestoreSnapshots: Array<{
+          readonly relativePath: string;
+          readonly targetPath: string;
+          readonly existed: boolean;
+          readonly preBytes?: Buffer | undefined;
+          readonly preMode?: number | undefined;
+        }> = [];
 
-      try {
         for (const file of cp.files) {
           const targetPath = resolvePathWithinWorkspace(
             file.relativePath,
             workingDirectory,
           );
-          const actionItem = plan.actions.find(
-            (a) => a.relativePath === file.relativePath,
-          );
-          if (!actionItem) {
-            continue;
-          }
+          let existed = false;
+          let preBytes: Buffer | undefined;
+          let preMode: number | undefined;
 
-          if (actionItem.isConflict) {
-            conflictsOverwritten++;
-          }
-
-          if (actionItem.action === "delete") {
-            if (existsSync(targetPath)) {
-              await unlink(targetPath);
-              filesDeleted++;
-              committedPaths.push(file.relativePath);
+          if (existsSync(targetPath)) {
+            try {
+              const stats = await lstat(targetPath);
+              if (stats.isFile()) {
+                existed = true;
+                preBytes = await readFile(targetPath);
+                preMode = stats.mode & 0o7777;
+              }
+            } catch (lstatErr) {
+              if ((lstatErr as NodeJS.ErrnoException)?.code !== "ENOENT") {
+                throw lstatErr;
+              }
             }
-          } else if (
-            actionItem.action === "create" ||
-            actionItem.action === "modify"
-          ) {
-            const blobBytes = stagedBlobs.get(file.beforeHash!)!;
-            await atomicWriteFile(targetPath, blobBytes);
-            filesRestored++;
-            committedPaths.push(file.relativePath);
           }
-        }
-      } catch (mutationError) {
-        throw new AggregateError(
-          [mutationError],
-          `Restore failed during filesystem mutations. Committed paths: ${committedPaths.join(", ")}`,
-        );
-      }
 
-      return {
-        checkpointId,
-        filesRestored,
-        filesDeleted,
-        conflictsOverwritten,
-      };
-    });
+          preRestoreSnapshots.push({
+            relativePath: file.relativePath,
+            targetPath,
+            existed,
+            preBytes,
+            preMode,
+          });
+        }
+
+        // Execution: perform mutations and track progress
+        let filesRestored = 0;
+        let filesDeleted = 0;
+        let conflictsOverwritten = 0;
+        const committedPaths: string[] = [];
+        const appliedSnapshots: typeof preRestoreSnapshots = [];
+
+        try {
+          for (const snapshot of preRestoreSnapshots) {
+            const actionItem = plan.actions.find(
+              (a) => a.relativePath === snapshot.relativePath,
+            );
+            if (!actionItem) {
+              continue;
+            }
+
+            if (actionItem.isConflict) {
+              conflictsOverwritten++;
+            }
+
+            if (actionItem.action === "delete") {
+              if (existsSync(snapshot.targetPath)) {
+                await unlink(snapshot.targetPath);
+                filesDeleted++;
+                committedPaths.push(snapshot.relativePath);
+                appliedSnapshots.push(snapshot);
+              }
+            } else if (
+              actionItem.action === "create" ||
+              actionItem.action === "modify"
+            ) {
+              const file = cp.files.find(
+                (f) => f.relativePath === snapshot.relativePath,
+              );
+              const blobBytes = stagedBlobs.get(file!.beforeHash!)!;
+              await atomicWriteFile(snapshot.targetPath, blobBytes, {
+                mode: snapshot.preMode,
+              });
+              filesRestored++;
+              committedPaths.push(snapshot.relativePath);
+              appliedSnapshots.push(snapshot);
+            }
+          }
+        } catch (mutationError) {
+          const primaryError =
+            mutationError instanceof Error
+              ? mutationError
+              : new Error(String(mutationError));
+
+          // Compensation rollback in reverse order
+          const compensatedPaths: string[] = [];
+          const unrecoveredPaths: string[] = [];
+          let compensationFailure: Error | undefined;
+
+          for (let i = appliedSnapshots.length - 1; i >= 0; i--) {
+            const snapshot = appliedSnapshots[i]!;
+            try {
+              if (snapshot.existed && snapshot.preBytes !== undefined) {
+                await atomicWriteFile(snapshot.targetPath, snapshot.preBytes, {
+                  mode: snapshot.preMode,
+                });
+                compensatedPaths.push(snapshot.relativePath);
+              } else if (!snapshot.existed) {
+                if (existsSync(snapshot.targetPath)) {
+                  await unlink(snapshot.targetPath);
+                }
+                compensatedPaths.push(snapshot.relativePath);
+              } else {
+                unrecoveredPaths.push(snapshot.relativePath);
+              }
+            } catch (compError) {
+              unrecoveredPaths.push(snapshot.relativePath);
+              if (!compensationFailure) {
+                compensationFailure =
+                  compError instanceof Error
+                    ? compError
+                    : new Error(String(compError));
+              }
+            }
+          }
+
+          const isFullyCompensated =
+            unrecoveredPaths.length === 0 &&
+            compensatedPaths.length === committedPaths.length;
+
+          throw new HernexCheckpointRestoreError({
+            checkpointId,
+            message: isFullyCompensated
+              ? `Checkpoint restore failed: ${primaryError.message}. All ${compensatedPaths.length} modified path(s) were successfully compensated and rolled back to their pre-call state.`
+              : `Checkpoint restore failed: ${primaryError.message}. Compensation was partial: ${compensatedPaths.length} path(s) compensated, ${unrecoveredPaths.length} path(s) unrecovered.`,
+            committedPaths,
+            compensatedPaths,
+            unrecoveredPaths,
+            isCompensated: isFullyCompensated,
+            originalError: primaryError,
+            compensationError: compensationFailure,
+          });
+        }
+
+        return {
+          checkpointId,
+          filesRestored,
+          filesDeleted,
+          conflictsOverwritten,
+        };
+      },
+    );
   }
 }
