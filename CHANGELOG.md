@@ -6,6 +6,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0] - 2026-11-12
+
+### Summary
+
+Version `0.5.0` introduces the built-in `WebSearchTool` (`webSearch`), expanding Hernex's default tool registry to 9 core tools. It features a native, high-reliability DuckDuckGo search engine with primary standard HTTP GET execution, automatic failover to `lite.duckduckgo.com`, HTML-to-Markdown conversion via Turndown, redirect link unwrapping, instant answer retrieval, multi-filter support (time, region, SafeSearch, domain whitelisting/blacklisting), pagination, and 15-minute response caching.
+
+---
+
+### New Features
+
+- **Built-in `WebSearchTool` (`webSearch`)**:
+  - Registered as the 9th default tool in `ToolRegistry`.
+  - Performs web searching using a dependency-free native DuckDuckGo engine.
+  - Automatically unwraps DuckDuckGo tracking redirects (`//duckduckgo.com/l/?uddg=...`) to provide agents with clean canonical destination URLs.
+  - Formats HTML snippets and overall search results into clean Markdown using `TurndownService`.
+  - Integrates DuckDuckGo Instant Answer API (`api.duckduckgo.com`) for entity summaries, Wikipedia abstracts, and related topics.
+
+- **High-Reliability Multi-Tier Search Architecture**:
+  - **Primary**: Standard navigation HTTP `GET` requests to `https://html.duckduckgo.com/html/` with modern browser User-Agent rotation, web-standard headers, and randomized human-like timing jitter (100–300ms).
+  - **Automatic Failover**: Transparently falls back to `https://lite.duckduckgo.com/lite/` if the primary endpoint encounters rate limiting or an anomaly challenge.
+  - **Fail-Soft Diagnostics**: Returns structured Markdown error diagnostic summaries rather than crashing the agent turn loop on upstream network errors.
+
+- **Advanced Search Parameters & Filtering**:
+  - `time`: Filter by publication date range (`"day"`, `"week"`, `"month"`, `"year"`, `"all"`).
+  - `safeSearch`: Moderation level control (`"strict"`, `"moderate"`, `"off"`).
+  - `region`: Geographic and language targeting (e.g. `"us-en"`, `"uk-en"`, `"in-en"`).
+  - `allowedDomains`: Whitelist domain filtering (e.g. `["github.com"]`).
+  - `blockedDomains`: Blacklist domain filtering.
+  - `offset` & `limit`: Complete pagination support returning `offset`, `nextOffset`, and `hasNextPage`.
+
+- **In-Memory Response Caching**:
+  - Deterministic 15-minute response caching (`cacheTtlMs: 900,000`).
+  - Repeated identical queries return cached Markdown (`cached: true`) with zero outbound network calls.
+
+---
+
 ## [0.4.0] - 2026-11-12
 
 ### Summary

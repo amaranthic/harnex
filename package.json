@@ -1,6 +1,6 @@
 {
   "name": "@amaranthic/hernex",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Unified AI agent runtime, microkernel engine, and tool harnesses built on Vercel AI SDK",
   "type": "module",
   "main": "./dist/index.js",
