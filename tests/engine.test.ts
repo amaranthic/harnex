@@ -15,6 +15,9 @@ import {
   type AgentReasoningLevel,
   type AgentTool,
   type ToolExecutionContext,
+  type ThreadStore,
+  type TranscriptEntry,
+  type NewTranscriptEntry,
   ToolRegistry,
   composeAgentHooks,
 } from "../src/index.js";
@@ -446,5 +449,105 @@ describe("AgentEngine Core Invariants", () => {
     const parsed = JSON.parse(serialized);
     expect(parsed.error instanceof Error).toBe(false);
     expect(typeof parsed.error).toBe("object");
+  });
+
+  it("guarantees exactly one turnFinished when terminal transcript append fails on success path", async () => {
+    const mockStore: ThreadStore = {
+      createThread: async () => ({
+        version: 1,
+        id: "th_test_123",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        tags: [],
+        workingDirectory: "/tmp",
+        turnCount: 0,
+        status: "idle",
+        activeTranscriptSequence: 0,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      }),
+      getThread: async () => undefined,
+      updateThread: async () => ({}) as any,
+      deleteThread: async () => true,
+      listThreads: async () => [],
+      getTranscript: async () => [],
+      getMessages: async () => [],
+      appendTranscript: async (_threadId, entry: NewTranscriptEntry) => {
+        if (entry.type === "turnFinished") {
+          throw new Error("Disk I/O failure during turnFinished persistence");
+        }
+        return { ...entry, sequence: 1 } as TranscriptEntry;
+      },
+    };
+
+    const engine = new AgentEngine(
+      createBaseConfig({
+        persist: true,
+        threadStore: mockStore,
+        hooks: {
+          onBeforeTurn: () => ({ veto: true }),
+        },
+      }),
+    );
+
+    const events: any[] = [];
+    for await (const event of engine.runTurn(
+      "Vetoed turn with throwing persistence",
+    )) {
+      events.push(event);
+    }
+
+    const finishEvents = events.filter((e) => e.type === "turnFinished");
+    expect(finishEvents.length).toBe(1);
+    expect(finishEvents[0].finishReason).toBe("vetoed");
+
+    const diagnosticErrors = events.filter(
+      (e) => e.type === "error" && e.origin === "engine" && e.isFatal === false,
+    );
+    expect(diagnosticErrors.length).toBe(1);
+    expect(diagnosticErrors[0].error.message).toContain(
+      "Disk I/O failure during turnFinished persistence",
+    );
+  });
+
+  it("guarantees exactly one turnFinished and surfaces diagnostic when onError hook throws", async () => {
+    let onErrorCalled = false;
+    const engine = new AgentEngine(
+      createBaseConfig({
+        model: "invalid-provider-prefix",
+        hooks: {
+          onError: async () => {
+            onErrorCalled = true;
+            throw new Error("Crashing onError hook implementation");
+          },
+        },
+      }),
+    );
+
+    const events: any[] = [];
+    for await (const event of engine.runTurn(
+      "Trigger model resolution error",
+    )) {
+      events.push(event);
+    }
+
+    expect(onErrorCalled).toBe(true);
+
+    const finishEvents = events.filter((e) => e.type === "turnFinished");
+    expect(finishEvents.length).toBe(1);
+    expect(finishEvents[0].finishReason).toBe("error");
+
+    const fatalErrors = events.filter(
+      (e) => e.type === "error" && e.isFatal === true,
+    );
+    expect(fatalErrors.length).toBe(1);
+
+    const hookErrors = events.filter(
+      (e) =>
+        e.type === "error" && e.origin === "hook" && e.hookName === "onError",
+    );
+    expect(hookErrors.length).toBe(1);
+    expect(hookErrors[0].error.message).toContain(
+      "Crashing onError hook implementation",
+    );
   });
 });

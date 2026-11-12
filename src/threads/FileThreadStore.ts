@@ -14,8 +14,10 @@ import {
   resolveHomeDirectory,
   type ResolveHomeDirectoryOptions,
 } from "../storage/homeDirectory.js";
-import { appendJsonl, readJsonl } from "../storage/jsonl.js";
+import { appendJsonl, readJsonl, writeJsonl } from "../storage/jsonl.js";
 import { withFileLock } from "../storage/lock.js";
+import { runTranscriptMigrationPipeline } from "./transcriptMigration.js";
+import { projectModelMessages } from "./transcriptProjection.js";
 import type {
   CreateThreadInput,
   NewTranscriptEntry,
@@ -371,7 +373,14 @@ export class FileThreadStore implements ThreadStore {
     if (!existsSync(transcriptPath)) {
       return [];
     }
-    return await readJsonl<TranscriptEntry>(transcriptPath);
+    const rawEntries = await readJsonl<Record<string, unknown>>(transcriptPath);
+    const { entries, wasMigrated } = runTranscriptMigrationPipeline(rawEntries);
+
+    if (wasMigrated) {
+      await writeJsonl(transcriptPath, entries);
+    }
+
+    return entries;
   }
 
   /**
@@ -401,15 +410,7 @@ export class FileThreadStore implements ThreadStore {
     const lockPath = this.getLockPath(threadId);
     return await withFileLock(lockPath, async () => {
       const transcript = await this.getTranscriptUnlocked(threadId);
-      const messages: ModelMessage[] = [];
-
-      for (const entry of transcript) {
-        if (entry.type === "modelMessage") {
-          messages.push(entry.message);
-        }
-      }
-
-      return messages;
+      return projectModelMessages(transcript);
     });
   }
 }

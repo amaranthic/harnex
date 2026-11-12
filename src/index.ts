@@ -94,7 +94,13 @@ export type {
 } from "./tools/index.js";
 
 // Threads & Stores
-export { FileThreadStore } from "./threads/index.js";
+export {
+  FileThreadStore,
+  CURRENT_TRANSCRIPT_VERSION,
+  migrateV1ToV2,
+  runTranscriptMigrationPipeline,
+  projectModelMessages,
+} from "./threads/index.js";
 
 export type {
   ThreadStatus,
@@ -105,6 +111,8 @@ export type {
   UpdateThreadInput,
   ThreadStore,
   AgentReasoningLevel,
+  TranscriptMigration,
+  MigrationPipelineResult,
 } from "./threads/index.js";
 
 // Checkpoints & Content-Addressed Delta Storage

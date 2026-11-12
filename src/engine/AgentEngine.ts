@@ -8,6 +8,7 @@ import type { ProviderRegistry } from "../model/ProviderRegistry.js";
 import type { AgentEvent } from "../events/index.js";
 import {
   FileThreadStore,
+  CURRENT_TRANSCRIPT_VERSION,
   type AgentReasoningLevel,
   type ThreadStore,
 } from "../threads/index.js";
@@ -324,6 +325,7 @@ export class AgentEngine {
     }
     if (this.resolvedThreadStore) {
       await this.resolvedThreadStore.appendTranscript(this.threadId, {
+        version: CURRENT_TRANSCRIPT_VERSION,
         type: "modelMessage",
         message,
         timestamp: Date.now(),

@@ -31,6 +31,28 @@ export type JsonValue =
   | { readonly [key: string]: JsonValue };
 
 /**
+ * Safely converts an arbitrary value into a serializable JsonValue.
+ *
+ * @param value - The input value to serialize.
+ * @returns A guaranteed JSON-serializable value.
+ */
+export function toJsonValue(value: unknown): JsonValue {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as JsonValue;
+  } catch {
+    return String(value);
+  }
+}
+
+/**
  * Standardized serializable error information emitted in events.
  */
 export interface ErrorInfo {

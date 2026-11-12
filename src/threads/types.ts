@@ -65,6 +65,7 @@ export interface ThreadMetadata {
  */
 export type TranscriptEntry =
   | {
+      readonly version?: number | undefined;
       readonly type: "turnStarted";
       readonly sequence: number;
       readonly turnIndex: number;
@@ -72,22 +73,28 @@ export type TranscriptEntry =
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "modelMessage";
       readonly sequence: number;
+      readonly turnIndex?: number | undefined;
       readonly message: ModelMessage;
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "toolCall";
       readonly sequence: number;
+      readonly turnIndex?: number | undefined;
       readonly callId: string;
       readonly toolName: string;
       readonly parameters: unknown;
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "toolResult";
       readonly sequence: number;
+      readonly turnIndex?: number | undefined;
       readonly callId: string;
       readonly toolName: string;
       readonly result: unknown;
@@ -95,13 +102,16 @@ export type TranscriptEntry =
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "checkpointRef";
       readonly sequence: number;
+      readonly turnIndex?: number | undefined;
       readonly checkpointId: string;
       readonly checkpointSequence: number;
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "turnFinished";
       readonly sequence: number;
       readonly turnIndex: number;
@@ -115,25 +125,32 @@ export type TranscriptEntry =
  */
 export type NewTranscriptEntry =
   | {
+      readonly version?: number | undefined;
       readonly type: "turnStarted";
       readonly turnIndex: number;
       readonly userPrompt: string;
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "modelMessage";
+      readonly turnIndex?: number | undefined;
       readonly message: ModelMessage;
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "toolCall";
+      readonly turnIndex?: number | undefined;
       readonly callId: string;
       readonly toolName: string;
       readonly parameters: unknown;
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "toolResult";
+      readonly turnIndex?: number | undefined;
       readonly callId: string;
       readonly toolName: string;
       readonly result: unknown;
@@ -141,12 +158,15 @@ export type NewTranscriptEntry =
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "checkpointRef";
+      readonly turnIndex?: number | undefined;
       readonly checkpointId: string;
       readonly checkpointSequence: number;
       readonly timestamp: number;
     }
   | {
+      readonly version?: number | undefined;
       readonly type: "turnFinished";
       readonly turnIndex: number;
       readonly finishReason: string;

@@ -6,6 +6,7 @@
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import path from "node:path";
+import { atomicWriteFile } from "./atomicFile.js";
 import { decodeValue, encodeValue, type EncodedValue } from "./valueCodec.js";
 
 /**
@@ -97,6 +98,29 @@ export async function appendJsonl<T>(
 
   const line = JSON.stringify(envelope) + "\n";
   await appendFile(absolutePath, line, "utf-8");
+}
+
+/**
+ * Writes an entire array of records to a JSONL file atomically using versioned tagged envelopes.
+ *
+ * @param filePath - The target JSONL file.
+ * @param records - Array of records to serialize and write.
+ * @throws {TypeError} If any record contains non-serializable values (e.g. functions, cycles).
+ * @throws {Error} If writing or temporary file replacement fails.
+ */
+export async function writeJsonl<T>(
+  filePath: string,
+  records: readonly T[],
+): Promise<void> {
+  const lines = records.map((record) => {
+    const envelope: JsonlEnvelope = {
+      version: 1,
+      value: encodeValue(record),
+    };
+    return JSON.stringify(envelope) + "\n";
+  });
+  const buffer = Buffer.from(lines.join(""), "utf-8");
+  await atomicWriteFile(filePath, buffer);
 }
 
 /**

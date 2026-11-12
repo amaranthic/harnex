@@ -11,6 +11,7 @@ import type { CheckpointCreatedEvent } from "../events/checkpointEvents.js";
 import type { AgentEngineConfig, RunTurnOptions } from "./engineConfig.js";
 import type { ToolExecutionContext } from "../tools/ToolExecutionContext.js";
 import { AsyncEventQueue } from "./eventQueue.js";
+import { CURRENT_TRANSCRIPT_VERSION } from "../threads/transcriptMigration.js";
 
 /**
  * Extracts normalized provider identifier from a model string if formatted as "provider/model_id".
@@ -142,6 +143,50 @@ export async function* runTurn(
 
   let finishReason: TurnFinishReason = "completed";
   const initialHistoryLength = conversationMessages.length;
+  let hasEmittedTurnFinished = false;
+
+  const finalizeTurn = async function* (
+    finalReason: TurnFinishReason,
+  ): AsyncGenerator<AgentEvent, void, unknown> {
+    if (hasEmittedTurnFinished) {
+      return;
+    }
+    hasEmittedTurnFinished = true;
+
+    // 1. Persist turnFinished to thread store FIRST
+    if (config.threadStore) {
+      try {
+        await config.threadStore.appendTranscript(config.threadId, {
+          version: CURRENT_TRANSCRIPT_VERSION,
+          type: "turnFinished",
+          turnIndex,
+          finishReason: finalReason,
+          usage: buildTotalUsage(),
+          timestamp: Date.now(),
+        });
+      } catch (persistenceError) {
+        // Emit error as non-fatal secondary diagnostic; do not crash terminal event emission
+        yield {
+          type: "error",
+          origin: "engine",
+          error: toErrorInfo(
+            persistenceError instanceof Error
+              ? persistenceError
+              : new Error(String(persistenceError)),
+          ),
+          isFatal: false,
+        };
+      }
+    }
+
+    // 2. Emit turnFinished event exactly once
+    yield {
+      type: "turnFinished",
+      turnIndex,
+      finishReason: finalReason,
+      totalUsage: buildTotalUsage(),
+    };
+  };
 
   try {
     // Partial credential override check
@@ -192,6 +237,7 @@ export async function* runTurn(
 
     if (config.threadStore) {
       await config.threadStore.appendTranscript(config.threadId, {
+        version: CURRENT_TRANSCRIPT_VERSION,
         type: "turnStarted",
         turnIndex,
         userPrompt,
@@ -211,20 +257,7 @@ export async function* runTurn(
       if (beforeTurnResult) {
         if (beforeTurnResult.veto) {
           finishReason = "vetoed";
-          yield {
-            type: "turnFinished",
-            turnIndex,
-            finishReason,
-            totalUsage: buildTotalUsage(),
-          };
-          if (config.threadStore) {
-            await config.threadStore.appendTranscript(config.threadId, {
-              type: "turnFinished",
-              turnIndex,
-              finishReason,
-              timestamp: Date.now(),
-            });
-          }
+          yield* finalizeTurn("vetoed");
           return;
         }
         if (beforeTurnResult.userPrompt) {
@@ -245,7 +278,9 @@ export async function* runTurn(
 
     if (config.threadStore) {
       await config.threadStore.appendTranscript(config.threadId, {
+        version: CURRENT_TRANSCRIPT_VERSION,
         type: "modelMessage",
+        turnIndex,
         message: userMessage,
         timestamp: Date.now(),
       });
@@ -344,7 +379,9 @@ export async function* runTurn(
       if (config.threadStore) {
         for (const msg of responseMessages) {
           await config.threadStore.appendTranscript(config.threadId, {
+            version: CURRENT_TRANSCRIPT_VERSION,
             type: "modelMessage",
+            turnIndex,
             message: msg,
             timestamp: Date.now(),
           });
@@ -385,7 +422,9 @@ export async function* runTurn(
 
             if (config.threadStore) {
               await config.threadStore.appendTranscript(config.threadId, {
+                version: CURRENT_TRANSCRIPT_VERSION,
                 type: "modelMessage",
+                turnIndex,
                 message: reminderMessage,
                 timestamp: Date.now(),
               });
@@ -451,7 +490,9 @@ export async function* runTurn(
 
           if (config.threadStore) {
             await config.threadStore.appendTranscript(config.threadId, {
+              version: CURRENT_TRANSCRIPT_VERSION,
               type: "toolResult",
+              turnIndex,
               callId: toolCall.callId,
               toolName: toolCall.toolName,
               result: missingErrorResult,
@@ -490,7 +531,9 @@ export async function* runTurn(
 
           if (config.threadStore) {
             await config.threadStore.appendTranscript(config.threadId, {
+              version: CURRENT_TRANSCRIPT_VERSION,
               type: "toolResult",
+              turnIndex,
               callId: toolCall.callId,
               toolName: toolCall.toolName,
               result: schemaErrorResult,
@@ -578,7 +621,9 @@ export async function* runTurn(
 
           if (config.threadStore) {
             await config.threadStore.appendTranscript(config.threadId, {
+              version: CURRENT_TRANSCRIPT_VERSION,
               type: "toolResult",
+              turnIndex,
               callId: toolCall.callId,
               toolName: toolCall.toolName,
               result: denialResult,
@@ -684,7 +729,9 @@ export async function* runTurn(
 
         if (config.threadStore) {
           await config.threadStore.appendTranscript(config.threadId, {
+            version: CURRENT_TRANSCRIPT_VERSION,
             type: "toolResult",
+            turnIndex,
             callId: toolCall.callId,
             toolName: toolCall.toolName,
             result: executionResult,
@@ -734,21 +781,7 @@ export async function* runTurn(
     }
 
     // 4. Conclude turn
-    yield {
-      type: "turnFinished",
-      turnIndex,
-      finishReason,
-      totalUsage: buildTotalUsage(),
-    };
-
-    if (config.threadStore) {
-      await config.threadStore.appendTranscript(config.threadId, {
-        type: "turnFinished",
-        turnIndex,
-        finishReason,
-        timestamp: Date.now(),
-      });
-    }
+    yield* finalizeTurn(finishReason);
   } catch (turnError) {
     const errorInstance =
       turnError instanceof Error ? turnError : new Error(String(turnError));
@@ -766,29 +799,30 @@ export async function* runTurn(
     };
 
     if (config.hooks?.onError) {
-      await config.hooks.onError({
-        error: errorInstance,
-        origin: "engine",
-        turnIndex,
-        isFatal: true,
-      });
+      try {
+        await config.hooks.onError({
+          error: errorInstance,
+          origin: "engine",
+          turnIndex,
+          isFatal: true,
+        });
+      } catch (hookError) {
+        // Yield hook error as non-fatal diagnostic so terminal turnFinished is guaranteed
+        yield {
+          type: "error",
+          origin: "hook",
+          error: toErrorInfo(
+            hookError instanceof Error
+              ? hookError
+              : new Error(String(hookError)),
+          ),
+          hookName: "onError",
+          isFatal: false,
+        };
+      }
     }
 
-    yield {
-      type: "turnFinished",
-      turnIndex,
-      finishReason,
-      totalUsage: buildTotalUsage(),
-    };
-
-    if (config.threadStore) {
-      await config.threadStore.appendTranscript(config.threadId, {
-        type: "turnFinished",
-        turnIndex,
-        finishReason,
-        timestamp: Date.now(),
-      });
-    }
+    yield* finalizeTurn("error");
   } finally {
     if (config.hooks?.onAfterTurn) {
       try {
