@@ -1,6 +1,6 @@
 # Tool Registry & Built-In Tools
 
-Hernex provides a structured tool registry and 8 built-in tools for workspace file manipulation, shell command execution, background process management, and safe web content retrieval.
+Hernex provides a structured tool registry and 9 built-in tools for workspace file manipulation, shell command execution, background process management, safe web content retrieval, and resilient web search.
 
 ---
 
@@ -144,3 +144,67 @@ All outbound requests pass through [`ssrfGuard`](../src/tools/internal/ssrfGuard
 - `prompt` (optional): Focused question or instruction to extract specific answers from the webpage content.
   - **Omitted `prompt`**: Returns full page Markdown directly with zero extra token latency.
   - **Provided `prompt`**: Executes a single-turn `generateText` call using the active model, credentials, and abort signal passed from the turn execution context, with up to 5 retry attempts and exponential backoff on transient errors.
+
+---
+
+## 7. High-Reliability Web Search: `WebSearchTool`
+
+[`WebSearchTool`](../src/tools/WebSearchTool.ts) (`webSearch`) performs web searches via a native DuckDuckGo engine with automatic redirect unwrapping, HTML-to-Markdown snippet conversion via Turndown, pagination, time/region filtering, and 15-minute response caching.
+
+### 7.1 Architecture & Failover Strategy
+
+- **Primary Provider**: Issues standard HTTP `GET` requests to `https://html.duckduckgo.com/html/` with realistic desktop/mobile User-Agents, HTTP standard navigation headers, and randomized human-like timing jitter (100–300ms).
+- **Automatic Fallback**: If the primary endpoint encounters rate limiting or an anomaly check, the engine seamlessly fails over to `https://lite.duckduckgo.com/lite/` so queries succeed without manual intervention.
+- **Zero Headless Browsers**: Operates entirely with lightweight HTTP `fetch`, avoiding the overhead, memory footprint, and bot-challenge vulnerabilities of headless browsers.
+- **Direct Link Unwrapping**: DuckDuckGo redirect URLs (`//duckduckgo.com/l/?uddg=...`) are automatically resolved and decoded to provide the agent with direct canonical target URLs.
+- **Instant Answers**: Concurrently queries `https://api.duckduckgo.com/` on first-page searches to retrieve Wikipedia abstracts, entity headings, and related topic links.
+
+### 7.2 Parameters & Input Schema
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `query` | `string` | *(required)* | Search query terms or question. |
+| `limit` | `number` (1–25) | `10` | Maximum number of results to return. |
+| `offset` | `number` | `0` | Pagination offset index (e.g. `0` for page 1, `10` for page 2). |
+| `time` | `"all" \| "day" \| "week" \| "month" \| "year"` | `"all"` | Filters results by publication date range. |
+| `safeSearch` | `"strict" \| "moderate" \| "off"` | `"moderate"` | SafeSearch moderation level. |
+| `region` | `string` | `undefined` | Geographic region / language code (e.g. `"us-en"`, `"uk-en"`, `"in-en"`). |
+| `allowedDomains` | `string[]` | `undefined` | Restricts results strictly to the specified domains (e.g. `["github.com"]`). |
+| `blockedDomains` | `string[]` | `undefined` | Excludes results matching the specified domains. |
+
+### 7.3 Output Contract
+
+```typescript
+interface WebSearchOutput {
+  readonly query: string;
+  readonly results: readonly DuckDuckGoSearchResultItem[];
+  readonly totalResults: number;
+  readonly offset: number;
+  readonly nextOffset?: number | undefined;
+  readonly hasNextPage: boolean;
+  readonly cached: boolean;
+  readonly durationMs: number;
+  readonly instantAnswer?: DuckDuckGoInstantAnswer | undefined;
+  readonly content: string; // Pre-formatted Markdown representation
+}
+```
+
+### 7.4 Example Usage
+
+```typescript
+import { createWebSearchTool } from "@amaranthic/hernex";
+
+const searchTool = createWebSearchTool();
+
+const result = await searchTool.execute(
+  {
+    query: "typescript 5.8 features",
+    time: "month",
+    limit: 5,
+    allowedDomains: ["devblogs.microsoft.com", "github.com"],
+  },
+  context,
+);
+
+console.log(result.content); // Clean Turndown Markdown output
+```

@@ -57,6 +57,8 @@ export {
   GrepTool,
   WebFetchTool,
   createWebFetchTool,
+  WebSearchTool,
+  createWebSearchTool,
   readFileInputSchema,
   writeFileInputSchema,
   editFileInputSchema,
@@ -65,12 +67,14 @@ export {
   globInputSchema,
   grepInputSchema,
   webFetchInputSchema,
+  webSearchInputSchema,
   readFileDescription,
   writeFileDescription,
   editFileDescription,
   bashDescription,
   taskManagerDescription,
   webFetchDescription,
+  webSearchDescription,
   defaultRetentionTtlMs,
   defaultMaxRetainedTasks,
 } from "./tools/index.js";
@@ -98,6 +102,14 @@ export type {
   WebFetchInput,
   WebFetchOutput,
   WebFetchToolOptions,
+  WebSearchInput,
+  WebSearchOutput,
+  WebSearchToolOptions,
+  DuckDuckGoSearchResultItem,
+  DuckDuckGoInstantAnswer,
+  DuckDuckGoSearchResult,
+  SearchTimeFilter,
+  SafeSearchLevel,
 } from "./tools/index.js";
 
 // Threads & Stores

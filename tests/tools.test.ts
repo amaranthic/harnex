@@ -32,15 +32,19 @@ import {
   TaskManagerTool,
   ToolRegistry,
   WebFetchTool,
+  WebSearchTool,
+  createWebSearchTool,
+  unwrapDuckDuckGoUrl,
+  convertSnippetToMarkdown,
   WriteFileTool,
 } from "../src/tools/index.js";
 
 describe("ToolRegistry", () => {
-  it("registers all 8 default tools when includeDefaults is true", () => {
+  it("registers all 9 default tools when includeDefaults is true", () => {
     const registry = new ToolRegistry();
     const list = registry.list();
 
-    expect(list.length).toBe(8);
+    expect(list.length).toBe(9);
     expect(registry.has("readFile")).toBe(true);
     expect(registry.has("writeFile")).toBe(true);
     expect(registry.has("editFile")).toBe(true);
@@ -49,7 +53,8 @@ describe("ToolRegistry", () => {
     expect(registry.has("glob")).toBe(true);
     expect(registry.has("grep")).toBe(true);
     expect(registry.has("webFetch")).toBe(true);
-    expect(registry.list().length).toBe(8);
+    expect(registry.has("webSearch")).toBe(true);
+    expect(registry.list().length).toBe(9);
 
     // Verify tool prompt descriptions match actual capabilities (F-005)
     const taskManagerTool = registry.resolve("taskManager")!;
@@ -1512,6 +1517,291 @@ describe("Built-in File & Shell Tools", () => {
           contextWithoutModel,
         ),
       ).rejects.toThrow("Extraction with 'prompt' requires an active model");
+    });
+  });
+
+  describe("WebSearchTool", () => {
+    const sampleHtmlResponse = `
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="result results_links results_links_deep result--ad">
+    <a class="result__a" href="https://duckduckgo.com/y.js?ad=1">Ad Title</a>
+    <a class="result__snippet">Ad snippet</a>
+  </div>
+  <div class="result results_links results_links_deep web-result">
+    <div class="links_main links_deep result__body">
+      <h2 class="result__title">
+        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.typescriptlang.org%2F&amp;rut=123">
+          TypeScript: JavaScript With Syntax For Types.
+        </a>
+      </h2>
+      <a class="result__snippet" href="https://www.typescriptlang.org/">
+        <b>TypeScript</b> is JavaScript with syntax for types. A strongly typed language.
+      </a>
+    </div>
+  </div>
+  <div class="result results_links results_links_deep web-result">
+    <div class="links_main links_deep result__body">
+      <h2 class="result__title">
+        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fmicrosoft%2FTypeScript&amp;rut=456">
+          GitHub - microsoft/TypeScript
+        </a>
+      </h2>
+      <a class="result__snippet" href="https://github.com/microsoft/TypeScript">
+        GitHub repository for <i>TypeScript</i> language compiler and tools.
+      </a>
+    </div>
+  </div>
+  <form action="/html/" method="post">
+    <input type="submit" value="Next" />
+    <input type="hidden" name="q" value="typescript" />
+    <input type="hidden" name="s" value="10" />
+    <input type="hidden" name="vqd" value="test-vqd-token-123" />
+  </form>
+</body>
+</html>
+    `;
+
+    const sampleLiteResponse = `
+<!DOCTYPE html>
+<html>
+<body>
+  <table border="0">
+    <tr class="result-sponsored">
+      <td><a href="https://duckduckgo.com/y.js?ad=1" class="result-link">Ad</a></td>
+    </tr>
+    <tr>
+      <td><a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdeno.land%2F" class='result-link'>Deno: The Next-Gen JavaScript Runtime</a></td>
+    </tr>
+    <tr>
+      <td class='result-snippet'>A secure runtime for <b>JavaScript</b> and <b>TypeScript</b>.</td>
+    </tr>
+  </table>
+  <form action="/lite/" method="post">
+    <input type="hidden" name="s" value="10" />
+  </form>
+</body>
+</html>
+    `;
+
+    it("unwraps DuckDuckGo redirect URLs correctly", () => {
+      expect(
+        unwrapDuckDuckGoUrl(
+          "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage%3Fid%3D1&rut=test",
+        ),
+      ).toBe("https://example.com/page?id=1");
+
+      expect(unwrapDuckDuckGoUrl("https://direct-link.org/docs")).toBe(
+        "https://direct-link.org/docs",
+      );
+      expect(unwrapDuckDuckGoUrl("")).toBe("");
+    });
+
+    it("converts HTML snippets to clean Markdown", () => {
+      const htmlSnippet =
+        "Learn <b>TypeScript</b> with <i>practical</i> examples &amp; tutorials.";
+      const md = convertSnippetToMarkdown(htmlSnippet);
+      expect(md).toContain("**TypeScript**");
+      expect(md).toContain("_practical_");
+      expect(md).toContain("&");
+    });
+
+    it("executes search and parses results into structured output with Turndown Markdown", async () => {
+      const mockFetch: typeof fetch = async (url) => {
+        const urlStr = url.toString();
+        if (urlStr.includes("api.duckduckgo.com")) {
+          return new Response(
+            JSON.stringify({
+              Heading: "TypeScript",
+              Abstract:
+                "TypeScript is a free open-source language developed by Microsoft.",
+              AbstractSource: "Wikipedia",
+              AbstractURL: "https://en.wikipedia.org/wiki/TypeScript",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(sampleHtmlResponse, {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        });
+      };
+
+      const tool = createWebSearchTool({
+        customFetch: mockFetch,
+        enableJitter: false,
+      });
+
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_search_1",
+        workingDirectory: testWorkspace,
+      };
+
+      const result = await tool.execute({ query: "typescript" }, context);
+
+      expect(result.query).toBe("typescript");
+      expect(result.totalResults).toBe(2);
+      expect(result.results[0]?.title).toBe(
+        "TypeScript: JavaScript With Syntax For Types.",
+      );
+      expect(result.results[0]?.url).toBe("https://www.typescriptlang.org/");
+      expect(result.results[0]?.domain).toBe("typescriptlang.org");
+      expect(result.results[0]?.snippet).toContain("**TypeScript**");
+
+      expect(result.hasNextPage).toBe(true);
+      expect(result.nextOffset).toBe(10);
+      expect(result.cached).toBe(false);
+
+      expect(result.instantAnswer?.heading).toBe("TypeScript");
+      expect(result.instantAnswer?.source).toBe("Wikipedia");
+
+      // Verify Markdown content includes instant answer and results
+      expect(result.content).toContain('## Search Results for "typescript"');
+      expect(result.content).toContain("### Instant Answer: TypeScript");
+      expect(result.content).toContain(
+        "1. [TypeScript: JavaScript With Syntax For Types.](https://www.typescriptlang.org/)",
+      );
+    });
+
+    it("filters results by allowedDomains and blockedDomains", async () => {
+      const mockFetch: typeof fetch = async (url) => {
+        if (url.toString().includes("api.duckduckgo.com")) {
+          return new Response("{}", {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(sampleHtmlResponse, {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        });
+      };
+
+      const tool = new WebSearchTool({
+        customFetch: mockFetch,
+        enableJitter: false,
+      });
+
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_search_filter",
+        workingDirectory: testWorkspace,
+      };
+
+      const filteredResult = await tool.execute(
+        { query: "typescript", allowedDomains: ["github.com"] },
+        context,
+      );
+
+      expect(filteredResult.totalResults).toBe(1);
+      expect(filteredResult.results[0]?.domain).toBe("github.com");
+
+      const blockedResult = await tool.execute(
+        { query: "typescript", blockedDomains: ["github.com"] },
+        context,
+      );
+
+      expect(blockedResult.totalResults).toBe(1);
+      expect(blockedResult.results[0]?.domain).toBe("typescriptlang.org");
+    });
+
+    it("falls back to lite.duckduckgo.com when primary html endpoint fails", async () => {
+      const mockFetch: typeof fetch = async (url) => {
+        const urlStr = url.toString();
+        if (urlStr.includes("api.duckduckgo.com")) {
+          return new Response("{}", { status: 200 });
+        }
+        if (urlStr.includes("html.duckduckgo.com")) {
+          return new Response("Rate limited", { status: 429 });
+        }
+        if (urlStr.includes("lite.duckduckgo.com")) {
+          return new Response(sampleLiteResponse, {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      };
+
+      const tool = new WebSearchTool({
+        customFetch: mockFetch,
+        enableJitter: false,
+      });
+
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_search_fallback",
+        workingDirectory: testWorkspace,
+      };
+
+      const result = await tool.execute({ query: "deno runtime" }, context);
+
+      expect(result.totalResults).toBe(1);
+      expect(result.results[0]?.url).toBe("https://deno.land/");
+      expect(result.results[0]?.domain).toBe("deno.land");
+      expect(result.hasNextPage).toBe(true);
+      expect(result.nextOffset).toBe(10);
+    });
+
+    it("serves repeated queries from in-memory cache", async () => {
+      let fetchCount = 0;
+      const mockFetch: typeof fetch = async (url) => {
+        if (url.toString().includes("api.duckduckgo.com")) {
+          return new Response("{}", { status: 200 });
+        }
+        fetchCount++;
+        return new Response(sampleHtmlResponse, {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        });
+      };
+
+      const tool = new WebSearchTool({
+        customFetch: mockFetch,
+        cacheTtlMs: 60000,
+        enableJitter: false,
+      });
+
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_cache_test",
+        workingDirectory: testWorkspace,
+      };
+
+      const firstCall = await tool.execute({ query: "typescript" }, context);
+      expect(firstCall.cached).toBe(false);
+      expect(fetchCount).toBe(1);
+
+      const secondCall = await tool.execute({ query: "typescript" }, context);
+      expect(secondCall.cached).toBe(true);
+      expect(fetchCount).toBe(1);
+      expect(secondCall.results.length).toBe(firstCall.results.length);
+    });
+
+    it("returns fail-soft markdown error when both endpoints fail", async () => {
+      const mockFailingFetch: typeof fetch = async () => {
+        throw new Error("DNS resolution failed");
+      };
+
+      const tool = new WebSearchTool({
+        customFetch: mockFailingFetch,
+        enableJitter: false,
+      });
+
+      const context = {
+        threadId: "test-thread",
+        toolCallId: "call_fail_soft",
+        workingDirectory: testWorkspace,
+      };
+
+      const result = await tool.execute({ query: "unreachable site" }, context);
+
+      expect(result.results).toHaveLength(0);
+      expect(result.totalResults).toBe(0);
+      expect(result.content).toContain("## Web Search Error");
+      expect(result.content).toContain("DNS resolution failed");
     });
   });
 });

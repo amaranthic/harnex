@@ -16,3 +16,13 @@ export * from "../tasks/index.js";
 export * from "./GlobTool.js";
 export * from "./GrepTool.js";
 export * from "./WebFetchTool.js";
+export * from "./WebSearchTool.js";
+export {
+  type DuckDuckGoSearchResultItem,
+  type DuckDuckGoInstantAnswer,
+  type DuckDuckGoSearchResult,
+  type SearchTimeFilter,
+  type SafeSearchLevel,
+  unwrapDuckDuckGoUrl,
+  convertSnippetToMarkdown,
+} from "./internal/duckDuckGo.js";

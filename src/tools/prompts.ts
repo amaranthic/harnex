@@ -69,3 +69,11 @@ export const webFetchDescription =
   "only the targeted information instead of the full page. " +
   "Includes SSRF protection (blocks private, loopback, and local network addresses), cross-host redirect detection, " +
   "and a 15-minute in-memory response cache.";
+
+/**
+ * System prompt description for WebSearchTool.
+ */
+export const webSearchDescription =
+  "Searches the web using DuckDuckGo with automatic redirect unwrapping, HTML-to-Markdown conversion via Turndown, " +
+  "pagination, time filtering ('day', 'week', 'month', 'year'), SafeSearch moderation, region targeting, domain filtering, " +
+  "and instant answer retrieval. Results are cached in memory for 15 minutes.";
