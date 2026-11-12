@@ -62,6 +62,7 @@ interface InternalTaskRecord {
   newlineCount: number;
   pendingBuffer: string;
   statusWasFailed: boolean;
+  persistenceFailed?: boolean | undefined;
   killTimer?: NodeJS.Timeout | undefined;
   escalationTimer?: NodeJS.Timeout | undefined;
   terminalTimestamp?: number | undefined;
@@ -185,7 +186,11 @@ export class TaskManager {
     }
 
     const logPath = path.join(taskDir, "output.log");
-    appendFileSync(logPath, "");
+    try {
+      appendFileSync(logPath, "");
+    } catch {
+      // Best-effort initialization of initial empty log file
+    }
 
     const cwd = input.cwd ?? this.workingDirectory;
     const env = getSafeBashEnvironment(input.envAllowlist);
@@ -253,28 +258,46 @@ export class TaskManager {
         totalLines: currentTotalLines,
       };
 
-      if (record.persistedBytes < this.maxOutputBytes) {
-        const available = this.maxOutputBytes - record.persistedBytes;
-        if (chunkBytes <= available) {
-          appendFileSync(logPath, text, "utf-8");
-          record.persistedBytes += chunkBytes;
-        } else {
-          const slice = Buffer.from(text, "utf-8")
-            .subarray(0, available)
-            .toString("utf-8");
-          if (slice.length > 0) {
-            appendFileSync(logPath, slice, "utf-8");
-            record.persistedBytes += Buffer.byteLength(slice, "utf-8");
+      // If output persistence has already failed, avoid repeatedly hammering failing I/O
+      if (record.persistenceFailed) {
+        return;
+      }
+
+      try {
+        if (record.persistedBytes < this.maxOutputBytes) {
+          const available = this.maxOutputBytes - record.persistedBytes;
+          if (chunkBytes <= available) {
+            appendFileSync(logPath, text, "utf-8");
+            record.persistedBytes += chunkBytes;
+          } else {
+            const slice = Buffer.from(text, "utf-8")
+              .subarray(0, available)
+              .toString("utf-8");
+            if (slice.length > 0) {
+              appendFileSync(logPath, slice, "utf-8");
+              record.persistedBytes += Buffer.byteLength(slice, "utf-8");
+            }
+            record.metadata = {
+              ...record.metadata,
+              outputTruncated: true,
+            };
           }
+        } else {
           record.metadata = {
             ...record.metadata,
             outputTruncated: true,
           };
         }
-      } else {
+      } catch (logError) {
+        // Contain log write failure within task lifecycle without letting exceptions escape stream listeners
+        record.persistenceFailed = true;
+        record.statusWasFailed = true;
+        const errorMessage =
+          logError instanceof Error ? logError.message : String(logError);
         record.metadata = {
           ...record.metadata,
-          outputTruncated: true,
+          status: "failed",
+          persistenceError: `Task output persistence failure: ${errorMessage}`,
         };
       }
     };
@@ -432,6 +455,9 @@ export class TaskManager {
         totalLines: meta.totalLines,
         outputBytes: meta.outputBytes,
         outputTruncated: meta.outputTruncated,
+        ...(meta.persistenceError !== undefined
+          ? { persistenceError: meta.persistenceError }
+          : {}),
       });
     }
 
@@ -481,6 +507,9 @@ export class TaskManager {
         hasMore: false,
         lines: [],
         outputTruncated: record.metadata.outputTruncated,
+        ...(record.metadata.persistenceError !== undefined
+          ? { persistenceError: record.metadata.persistenceError }
+          : {}),
       };
     }
 
@@ -515,6 +544,9 @@ export class TaskManager {
       hasMore,
       lines,
       outputTruncated: record.metadata.outputTruncated,
+      ...(record.metadata.persistenceError !== undefined
+        ? { persistenceError: record.metadata.persistenceError }
+        : {}),
     };
   }
 

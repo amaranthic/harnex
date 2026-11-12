@@ -4,7 +4,7 @@
  * and built-in tools (readFile, writeFile, editFile, bash, glob, grep).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -436,6 +436,105 @@ describe("Built-in File & Shell Tools", () => {
     expect(emittedProgress).toContain("hello from bash");
 
     await taskManager.shutdown();
+  });
+
+  it("terminates foreground Bash processes and managed process tree when aborted before completion", async () => {
+    const bashTool = new BashTool();
+    const taskManager = new TaskManager({
+      threadId: "abort-thread",
+      workingDirectory: testWorkspace,
+    });
+    const abortController = new AbortController();
+
+    const context = {
+      threadId: "abort-thread",
+      toolCallId: "call-abort",
+      workingDirectory: testWorkspace,
+      taskManager,
+      abortSignal: abortController.signal,
+    };
+
+    // Run a command that sleeps in foreground
+    const executePromise = bashTool.execute(
+      {
+        command: "node -e 'setInterval(() => {}, 1000)'",
+        waitMsBeforeAsync: 10000,
+      },
+      context,
+    );
+
+    // Allow process to spawn
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    // Abort the foreground execution
+    abortController.abort("Turn cancelled by product");
+
+    await expect(executePromise).rejects.toThrow("aborted");
+
+    // Task must have reached terminal killed status
+    const tasks = taskManager.listTasks();
+    expect(tasks.length).toBe(1);
+    expect(tasks[0]?.status).toBe("killed");
+
+    await taskManager.shutdown();
+  });
+
+  it("contains task output persistence failures inside the child stream callback without crashing host process", async () => {
+    const taskManager = new TaskManager({
+      threadId: "persistence-fail-thread",
+      workingDirectory: testWorkspace,
+    });
+
+    let stdoutReceived = "";
+    const fs = await import("node:fs");
+    const originalAppendFileSync = fs.appendFileSync;
+    const appendSpy = spyOn(fs, "appendFileSync").mockImplementation(
+      (pathArg, data, opt) => {
+        if (typeof data === "string" && data.length > 0) {
+          throw new Error("ENOSPC: no space left on device");
+        }
+        return originalAppendFileSync(pathArg, data, opt);
+      },
+    );
+
+    try {
+      const task = await taskManager.createTask(
+        {
+          command:
+            'node -e \'console.log("first line"); console.error("error line");\'',
+          cwd: testWorkspace,
+        },
+        {
+          onOutput: (chunk) => {
+            stdoutReceived += chunk;
+          },
+        },
+      );
+
+      // Await task completion
+      const waitResult = await taskManager.waitForTask(task.id, {
+        timeoutMs: 5000,
+      });
+
+      // Host process is still alive and task reached terminal status "failed"
+      expect(waitResult.task.status).toBe("failed");
+      expect(waitResult.task.persistenceError).toBeDefined();
+      expect(waitResult.task.persistenceError).toContain(
+        "Task output persistence failure: ENOSPC",
+      );
+
+      // Verify task in list and read
+      const taskMeta = taskManager.getTask(task.id);
+      expect(taskMeta?.status).toBe("failed");
+      expect(taskMeta?.persistenceError).toContain("ENOSPC");
+
+      const readResult = await taskManager.readTask(task.id, 1, 10);
+      expect(readResult.status).toBe("failed");
+      expect(readResult.persistenceError).toContain("ENOSPC");
+    } finally {
+      appendSpy.mockRestore();
+      await taskManager.shutdown();
+    }
   });
 
   it("executes GlobTool and GrepTool across files", async () => {

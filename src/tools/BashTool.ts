@@ -160,40 +160,53 @@ export class BashTool implements AgentTool<typeof bashInputSchema, BashOutput> {
       };
     }
 
-    const waitResult = await taskManager.waitForTask(task.id, {
-      timeoutMs: waitMsBeforeAsync,
-      signal: context.abortSignal,
-    });
+    try {
+      const waitResult = await taskManager.waitForTask(task.id, {
+        timeoutMs: waitMsBeforeAsync,
+        signal: context.abortSignal,
+      });
 
-    isObserving = false;
-    const durationMs = Date.now() - startTime;
+      const durationMs = Date.now() - startTime;
 
-    if (waitResult.timedOut) {
+      if (waitResult.timedOut) {
+        return {
+          status: "running",
+          command: parameters.command,
+          taskId: task.id,
+          output: observedOutput,
+          exitCode: null,
+          durationMs,
+          outputTruncated: isOutputTruncated || waitResult.task.outputTruncated,
+        };
+      }
+
+      const finalStatus: "running" | "exited" | "killed" | "failed" =
+        waitResult.task.status === "orphaned"
+          ? "exited"
+          : (waitResult.task.status as
+              "running" | "exited" | "killed" | "failed");
+
       return {
-        status: "running",
+        status: finalStatus,
         command: parameters.command,
         taskId: task.id,
         output: observedOutput,
-        exitCode: null,
+        exitCode: waitResult.task.exitCode,
         durationMs,
         outputTruncated: isOutputTruncated || waitResult.task.outputTruncated,
       };
+    } catch (waitError) {
+      if (context.abortSignal?.aborted) {
+        // Foreground task was aborted: terminate the process tree and await terminal state
+        try {
+          await taskManager.stopTask(task.id);
+        } catch {
+          // Process may have already exited
+        }
+      }
+      throw waitError;
+    } finally {
+      isObserving = false;
     }
-
-    const finalStatus: "running" | "exited" | "killed" | "failed" =
-      waitResult.task.status === "orphaned"
-        ? "exited"
-        : (waitResult.task.status as
-            "running" | "exited" | "killed" | "failed");
-
-    return {
-      status: finalStatus,
-      command: parameters.command,
-      taskId: task.id,
-      output: observedOutput,
-      exitCode: waitResult.task.exitCode,
-      durationMs,
-      outputTruncated: isOutputTruncated || waitResult.task.outputTruncated,
-    };
   }
 }

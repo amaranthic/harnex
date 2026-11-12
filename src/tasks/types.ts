@@ -77,6 +77,8 @@ export interface ShellTaskMetadata {
   readonly outputTruncated: boolean;
   /** Absolute path to the on-disk output.log file. */
   readonly logPath: string;
+  /** Details of any output logging persistence failure encountered. */
+  readonly persistenceError?: string | undefined;
 }
 
 /**
@@ -99,6 +101,8 @@ export interface TaskSummary {
   readonly outputBytes: number;
   /** Whether output logging was truncated due to exceeding maxOutputBytes. */
   readonly outputTruncated: boolean;
+  /** Details of any output logging persistence failure encountered. */
+  readonly persistenceError?: string | undefined;
 }
 
 /**
@@ -123,6 +127,8 @@ export interface TaskReadResult {
   readonly lines: readonly string[];
   /** Whether the underlying log was truncated due to the byte cap. */
   readonly outputTruncated: boolean;
+  /** Details of any output logging persistence failure encountered. */
+  readonly persistenceError?: string | undefined;
 }
 
 /**
