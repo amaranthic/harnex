@@ -6,6 +6,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] - 2026-11-12
+
+### Summary
+
+Version `0.4.0` introduces the built-in `WebFetchTool` (`webFetch`), expanding Hernex's default tool registry to 8 core tools. Features include comprehensive Server-Side Request Forgery (SSRF) defense via `ipaddr.js`, automated HTML-to-Markdown conversion using `turndown`, cross-host redirect safety halts, a 15-minute in-memory response cache, and model-driven focused extraction with exponential backoff retries.
+
+---
+
+### New Features
+
+- **Built-in `WebFetchTool` (`webFetch`)**:
+  - Registered as the 8th default tool in `ToolRegistry` alongside file and shell tools.
+  - Automatically fetches HTTP and HTTPS web resources and converts HTML directly into clean Markdown using `TurndownService`.
+  - Formats `application/json` responses into syntax-highlighted code blocks and handles plain text.
+
+- **SSRF Defense Architecture (`ssrfGuard`)**:
+  - Validates all destination addresses using `ipaddr.js`.
+  - Rejects private IPv4 networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.0/8`), link-local / IMDS (`169.254.0.0/16`), carrier-grade NAT (`100.64.0.0/10`), unspecified (`0.0.0.0/8`), multicast, and reserved ranges.
+  - Rejects IPv6 loopback (`::1`), link-local (`fe80::/10`), unique local (`fc00::/7`), and IPv4-mapped IPv6 variants (`::ffff:x.x.x.x`).
+  - Blocks local host suffixes (`.local`, `.internal`, `.localhost`, `.lan`), single-label internal hosts, cloud metadata endpoints (`metadata.google.internal`, `instance-data`), and embedded basic auth credentials.
+
+- **Cross-Host Redirect Safety**:
+  - Follows permitted same-host and `www.` redirects up to 5 hops.
+  - Halts cross-host redirects and returns a notice with the target location, preserving agent control and security oversight over unexpected domain jumps.
+
+- **In-Memory Response Caching**:
+  - Implements a 15-minute response cache (`cacheTtlMs: 900,000`).
+  - Subsequent requests targeting identical URLs within TTL return cached Markdown (`cached: true`) with zero network latency.
+
+- **Model-Driven Targeted Extraction**:
+  - Supports optional `prompt` parameter on `webFetch`.
+  - If omitted: returns clean page Markdown directly (zero extra token overhead).
+  - If provided: runs single-turn extraction via Hernex's `generateText` runtime using the turn's active model and credentials, with up to 5 retry attempts and exponential backoff on transient errors.
+
+---
+
+### Bug Fixes & Resilience Hardening
+
+- **Storage Stale-Lock Recovery Test**:
+  - Corrected hardcoded PID `1234` in `tests/storage.test.ts` to use `process.pid`, ensuring the process liveness probe accurately tests timeout behavior against an active lock holder.
+
+---
+
 ## [0.3.0] - 2026-11-12
 
 ### Summary
