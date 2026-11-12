@@ -6,17 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.2.0] - 2026-11-12
+## [0.3.0] - 2026-11-12
 
 ### Summary
 
-Version `0.2.0` represents a comprehensive architectural overhaul, hardening the microkernel agent engine, standardizing conversational persistence terminology, enforcing strict tool schema validation, introducing workspace-wide transactional file locking, upgrading transcript replay to full AI SDK v7 compatibility, and eliminating prototype pollution and serialization bugs.
+Version `0.3.0` represents a comprehensive architectural overhaul, hardening the microkernel agent engine, standardizing conversational persistence terminology, enforcing strict tool schema validation, introducing workspace-wide transactional file locking, upgrading transcript replay to full AI SDK v7 compatibility, and eliminating prototype pollution and serialization bugs.
 
 ---
 
 ### Migration Guide: Upgrading from `0.1.x`
 
-This section details every breaking change between `0.1.x` and `0.2.0` and provides clear code examples on how to update older code.
+This section details every breaking change between `0.1.x` and `0.3.0` and provides clear code examples on how to update older code.
 
 #### 1. Package Rebrand: `@amaranthic/harnex` → `@amaranthic/hernex`
 
@@ -28,7 +28,7 @@ The package and repository have been renamed to `@amaranthic/hernex`.
 import { AgentEngine, FileThreadStore } from "@amaranthic/harnex";
 ```
 
-**After (`0.2.0`):**
+**After (`0.3.0`):**
 
 ```ts
 import { AgentEngine, FileThreadStore } from "@amaranthic/hernex";
@@ -39,7 +39,7 @@ Update your `package.json`:
 ```json
 {
   "dependencies": {
-    "@amaranthic/hernex": "^0.2.0"
+    "@amaranthic/hernex": "^0.3.0"
   }
 }
 ```
@@ -62,7 +62,7 @@ const engine = new AgentEngine({
 const session = await engine.sessionStore.getSession("session-123");
 ```
 
-**After (`0.2.0`):**
+**After (`0.3.0`):**
 
 ```ts
 const engine = new AgentEngine({
@@ -76,7 +76,7 @@ const thread = await engine.threadStore.getThread("thread-123");
 
 **Key API Renames:**
 
-| Older API (`0.1.x`)                         | New API (`0.2.0`)                         |
+| Older API (`0.1.x`)                         | New API (`0.3.0`)                         |
 | :------------------------------------------ | :---------------------------------------- |
 | `config.sessionId`                          | `config.threadId`                         |
 | `config.sessionStore`                       | `config.threadStore`                      |
@@ -106,7 +106,7 @@ await globTool.execute({
 });
 ```
 
-**After (`0.2.0`):**
+**After (`0.3.0`):**
 
 ```ts
 await globTool.execute({
@@ -128,7 +128,7 @@ await grepTool.execute({
 });
 ```
 
-**After (`0.2.0`):**
+**After (`0.3.0`):**
 
 ```ts
 // For targeted single-file search:
@@ -160,7 +160,7 @@ Turn indexing across `ToolExecutionContext`, checkpoints, and engine hooks now s
 context.turnIndex; // Could be 0
 ```
 
-**After (`0.2.0`):**
+**After (`0.3.0`):**
 
 ```ts
 // Turn counter starts at 1
@@ -184,7 +184,7 @@ try {
 }
 ```
 
-**After (`0.2.0`):**
+**After (`0.3.0`):**
 
 ```ts
 import { HernexCheckpointRestoreError } from "@amaranthic/hernex";
