@@ -319,6 +319,13 @@ export async function* runTurn(
         ...(hasTools ? { tools: sdkToolDefinitions } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(effectiveSignal ? { abortSignal: effectiveSignal } : {}),
+        // Explicitly handle onError to prevent Vercel AI SDK from falling back to console.error(error).
+        // Hernex's turn generator catch block handles logging, rollback, and event yielding.
+        onError: (_event: { error: unknown }): void => {
+          // No-op here: turn generator's catch block handles the stream failure,
+          // rolls back messages, yields { type: "error", origin: "engine", ... }, and invokes
+          // config.hooks.onError if configured.
+        },
       };
 
       const proposedToolCalls: Array<{

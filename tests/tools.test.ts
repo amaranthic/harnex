@@ -1358,7 +1358,7 @@ describe("Built-in File & Shell Tools", () => {
         </html>
       `;
 
-      const mockFetch: typeof fetch = async () =>
+      const mockFetch = async () =>
         new Response(htmlBody, {
           status: 200,
           headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -1395,7 +1395,7 @@ describe("Built-in File & Shell Tools", () => {
         version: "0.3.0",
         active: true,
       });
-      const mockFetch: typeof fetch = async () =>
+      const mockFetch = async () =>
         new Response(jsonBody, {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -1420,7 +1420,7 @@ describe("Built-in File & Shell Tools", () => {
 
     it("serves repeated requests from in-memory cache within TTL", async () => {
       let networkFetchCount = 0;
-      const mockFetch: typeof fetch = async () => {
+      const mockFetch = async () => {
         networkFetchCount++;
         return new Response("<p>Cached content test</p>", {
           status: 200,
@@ -1456,7 +1456,7 @@ describe("Built-in File & Shell Tools", () => {
     });
 
     it("follows same-host redirects but halts on cross-host redirects", async () => {
-      const mockFetch: typeof fetch = async (inputUrl) => {
+      const mockFetch = async (inputUrl: string | URL | Request) => {
         const urlStr = String(inputUrl);
 
         if (urlStr === "https://example.com/start") {
@@ -1498,7 +1498,7 @@ describe("Built-in File & Shell Tools", () => {
     });
 
     it("requires context.model when prompt parameter is provided", async () => {
-      const mockFetch: typeof fetch = async () =>
+      const mockFetch = async () =>
         new Response("<p>Some article</p>", {
           status: 200,
           headers: { "Content-Type": "text/html" },
@@ -1608,7 +1608,7 @@ describe("Built-in File & Shell Tools", () => {
     });
 
     it("executes search and parses results into structured output with Turndown Markdown", async () => {
-      const mockFetch: typeof fetch = async (url) => {
+      const mockFetch = async (url: string | URL | Request) => {
         const urlStr = url.toString();
         if (urlStr.includes("api.duckduckgo.com")) {
           return new Response(
@@ -1666,7 +1666,7 @@ describe("Built-in File & Shell Tools", () => {
     });
 
     it("filters results by allowedDomains and blockedDomains", async () => {
-      const mockFetch: typeof fetch = async (url) => {
+      const mockFetch = async (url: string | URL | Request) => {
         if (url.toString().includes("api.duckduckgo.com")) {
           return new Response("{}", {
             status: 200,
@@ -1708,7 +1708,7 @@ describe("Built-in File & Shell Tools", () => {
     });
 
     it("falls back to lite.duckduckgo.com when primary html endpoint fails", async () => {
-      const mockFetch: typeof fetch = async (url) => {
+      const mockFetch = async (url: string | URL | Request) => {
         const urlStr = url.toString();
         if (urlStr.includes("api.duckduckgo.com")) {
           return new Response("{}", { status: 200 });
@@ -1747,7 +1747,7 @@ describe("Built-in File & Shell Tools", () => {
 
     it("serves repeated queries from in-memory cache", async () => {
       let fetchCount = 0;
-      const mockFetch: typeof fetch = async (url) => {
+      const mockFetch = async (url: string | URL | Request) => {
         if (url.toString().includes("api.duckduckgo.com")) {
           return new Response("{}", { status: 200 });
         }
@@ -1781,7 +1781,7 @@ describe("Built-in File & Shell Tools", () => {
     });
 
     it("returns fail-soft markdown error when both endpoints fail", async () => {
-      const mockFailingFetch: typeof fetch = async () => {
+      const mockFailingFetch = async () => {
         throw new Error("DNS resolution failed");
       };
 

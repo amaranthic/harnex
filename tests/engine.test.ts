@@ -2,7 +2,7 @@
  * @fileoverview High-coverage unit tests for the AgentEngine microkernel and turn loop contracts.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -549,5 +549,52 @@ describe("AgentEngine Core Invariants", () => {
     expect(hookErrors[0].error.message).toContain(
       "Crashing onError hook implementation",
     );
+  });
+
+  it("does not leak raw AI SDK error to console.error on model failure", async () => {
+    const consoleErrorSpy = mock(() => {});
+    const originalConsoleError = console.error;
+    console.error = consoleErrorSpy;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: "non-existent-model-id-12345 is not a valid model ID",
+            type: "invalid_request_error",
+          },
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }) as unknown as typeof fetch;
+
+    try {
+      const engine = new AgentEngine(
+        createBaseConfig({
+          threadId: "test-err-leak",
+          model: "openrouter/non-existent-model-id-12345",
+          baseUrl: "https://openrouter.ai/api/v1",
+        }),
+      );
+
+      const events: any[] = [];
+      for await (const event of engine.runTurn("hello")) {
+        events.push(event);
+      }
+
+      // Engine must emit an error event
+      const errorEvents = events.filter((e) => e.type === "error");
+      expect(errorEvents.length).toBeGreaterThan(0);
+
+      // console.error must NOT have been called by AI SDK
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    } finally {
+      console.error = originalConsoleError;
+      globalThis.fetch = originalFetch;
+    }
   });
 });

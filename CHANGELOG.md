@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.1] - 2026-11-14
+
+### Summary
+
+Version `0.5.1` resolves an issue where Vercel AI SDK leaked raw debug dumps, unformatted stack traces, and HTTP request headers to `stderr` upon model or stream failure. It also decouples `customFetch` options from Bun's global `fetch` type, standardizing custom fetch injection across Node.js and Bun environments.
+
+---
+
+### Fixed
+
+- **Raw AI SDK Error Leak in Turn Generator**:
+  - Explicitly passed an `onError` handler to `streamOptions` in `runTurn` to prevent Vercel AI SDK from falling back to its default `({ error }) => console.error(error)` behavior.
+  - Ensures failed turns bubble exclusively through Hernex's structured turn generator `catch` block, rolling back conversation messages, yielding clean `{ type: "error", origin: "engine", ... }` events, and invoking `hooks.onError`.
+  - Added unit test coverage verifying that `console.error` is not invoked when model streaming encounters provider errors or connection failures.
+
+- **Standardized `FetchFunction` Type Definition**:
+  - Exported standard `FetchFunction` type decoupled from Bun-specific namespace extensions (`fetch.preconnect`).
+  - Updated `WebFetchToolOptions`, `WebSearchToolOptions`, and internal DuckDuckGo search options to accept `FetchFunction | typeof fetch`.
+
+---
+
 ## [0.5.0] - 2026-11-12
 
 ### Summary

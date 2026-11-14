@@ -15,6 +15,7 @@ import {
   type SafeSearchLevel,
   type SearchTimeFilter,
 } from "./internal/duckDuckGo.js";
+import type { FetchFunction } from "./WebFetchTool.js";
 import { webSearchDescription } from "./prompts.js";
 
 /**
@@ -151,7 +152,7 @@ export interface WebSearchToolOptions {
   /**
    * Optional custom fetch implementation for testing or sandboxing.
    */
-  readonly customFetch?: typeof fetch | undefined;
+  readonly customFetch?: FetchFunction | typeof fetch | undefined;
 
   /**
    * Whether to enable human-like timing jitter between queries. Defaults to true.
@@ -198,7 +199,7 @@ export class WebSearchTool implements AgentTool<
   /**
    * Custom fetch function override.
    */
-  private readonly fetchFn?: typeof fetch | undefined;
+  private readonly fetchFn?: FetchFunction | typeof fetch | undefined;
 
   /**
    * Whether human-like timing jitter is enabled.

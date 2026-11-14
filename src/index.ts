@@ -102,6 +102,7 @@ export type {
   WebFetchInput,
   WebFetchOutput,
   WebFetchToolOptions,
+  FetchFunction,
   WebSearchInput,
   WebSearchOutput,
   WebSearchToolOptions,

@@ -7,6 +7,7 @@
  */
 
 import TurndownService from "turndown";
+import type { FetchFunction } from "../WebFetchTool.js";
 
 /**
  * List of realistic desktop and mobile user agents to mimic real human browsing.
@@ -87,7 +88,7 @@ export interface DuckDuckGoSearchOptions {
   /**
    * Optional custom fetch implementation for testing or sandboxing.
    */
-  readonly customFetch?: typeof fetch | undefined;
+  readonly customFetch?: FetchFunction | typeof fetch | undefined;
 
   /**
    * Whether to inject a small random human-like delay before executing (default: true).
@@ -443,7 +444,7 @@ export function isDomainAllowed(
  */
 export async function fetchDuckDuckGoInstantAnswer(
   query: string,
-  fetchFn: typeof fetch,
+  fetchFn: FetchFunction | typeof fetch,
   abortSignal?: AbortSignal,
 ): Promise<DuckDuckGoInstantAnswer | undefined> {
   try {

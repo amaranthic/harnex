@@ -94,6 +94,24 @@ export interface WebFetchOutput {
 }
 
 /**
+ * Function signature for standard web fetch operations compatible with Fetch API.
+ *
+ * @param input - The resource URL or Request object.
+ * @param init - Optional configuration options for the fetch request.
+ * @returns A promise resolving to the fetch Response.
+ * @example
+ * ```ts
+ * const customFetch: FetchFunction = async (url, init) => {
+ *   return fetch(url, init);
+ * };
+ * ```
+ */
+export type FetchFunction = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
+/**
  * Configuration options for customizing WebFetchTool behavior.
  */
 export interface WebFetchToolOptions {
@@ -120,7 +138,7 @@ export interface WebFetchToolOptions {
   /**
    * Optional custom fetch implementation for testing or sandboxed network routing.
    */
-  readonly customFetch?: typeof fetch | undefined;
+  readonly customFetch?: FetchFunction | typeof fetch | undefined;
 }
 
 /**
@@ -204,7 +222,7 @@ export class WebFetchTool implements AgentTool<
   private readonly timeoutMs: number;
   private readonly cacheTtlMs: number;
   private readonly maxResponseBytes: number;
-  private readonly fetchFn: typeof fetch;
+  private readonly fetchFn: FetchFunction | typeof fetch;
   private readonly turndown: TurndownService;
   private readonly cache = new Map<string, CachedPage>();
 
