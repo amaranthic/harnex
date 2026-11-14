@@ -1,6 +1,6 @@
 {
   "name": "@amaranthic/hernex",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Unified AI agent runtime, microkernel engine, and tool harnesses built on Vercel AI SDK",
   "type": "module",
   "main": "./dist/index.js",
@@ -28,7 +28,8 @@
     "build": "tsc",
     "typecheck": "tsc --project tsconfig.test.json",
     "test": "bun test",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run build"
   },
   "engines": {
     "node": ">=22.0.0"

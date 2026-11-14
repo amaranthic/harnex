@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.2] - 2026-11-14
+
+### Summary
+
+Version `0.5.2` ensures compiled distribution bundles (`dist/`) are strictly kept in sync prior to packaging and publishing by introducing an automated `prepublishOnly` lifecycle hook.
+
+---
+
+### Changed
+
+- **Automated Build on Prepublish**:
+  - Added `"prepublishOnly": "bun run build"` script to `package.json` to prevent packaging stale `dist/` artifacts.
+  - Re-emitted clean, up-to-date TypeScript declarations and distribution outputs in `dist/`.
+
+---
+
 ## [0.5.1] - 2026-11-14
 
 ### Summary
